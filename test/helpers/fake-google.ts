@@ -59,6 +59,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}) {
   /** `${dataSource}|${language~label~offer}` → stored input */
   const inputs = new Map<string, Json>();
   const dataSources = new Set<string>();
+  /** name → data source body, as Google lists it */
+  const dataSourceBodies = new Map<string, Json>();
   let dataSourceSeq = 0;
   let batches = 0;
   let tokens = 0;
@@ -84,10 +86,15 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}) {
     if ((m = path.match(/^\/datasources\/v1\/accounts\/(\d+)\/dataSources$/)) && method === 'POST') {
       const name = `accounts/${m[1]}/dataSources/${++dataSourceSeq}`;
       dataSources.add(name);
+      dataSourceBodies.set(name, { ...body, name });
       return { status: 200, body: { ...body, name } };
+    }
+    if ((m = path.match(/^\/datasources\/v1\/accounts\/(\d+)\/dataSources$/)) && method === 'GET') {
+      return { status: 200, body: { dataSources: [...dataSources].map((name) => dataSourceBodies.get(name) ?? { name }) } };
     }
     if ((m = path.match(/^\/datasources\/v1\/(accounts\/\d+\/dataSources\/\d+)$/)) && method === 'DELETE') {
       if (!dataSources.delete(m[1])) return notFound();
+      dataSourceBodies.delete(m[1]);
       for (const key of [...inputs.keys()]) if (key.startsWith(`${m[1]}|`)) inputs.delete(key);
       return { status: 200, body: {} };
     }
@@ -139,11 +146,18 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}) {
     return json(handle(method, url.pathname + url.search, text ? JSON.parse(text) : undefined));
   });
 
+  /** A data source that an earlier connection left in Google. */
+  function addDataSource(body: { name: string; displayName?: string; primaryProductDataSource?: Json }) {
+    dataSources.add(body.name);
+    dataSourceBodies.set(body.name, body);
+  }
+
   return {
     fetch: fetch as unknown as typeof globalThis.fetch,
     requests,
     inputs,
     dataSources,
+    addDataSource,
     batches: () => batches,
   };
 }

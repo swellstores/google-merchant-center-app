@@ -1,6 +1,6 @@
 import type { AppContext, SwellClient } from '../context';
 import { GoogleApiError, googleCall } from '../google/http';
-import { createDataSource, deleteDataSource } from '../google/merchant';
+import { createDataSource, dataSourceName, deleteDataSource, listDataSources } from '../google/merchant';
 
 export interface Market {
   id: string;
@@ -48,16 +48,47 @@ export async function replaceMarket(ctx: AppContext, token: string, next: Market
   return ctx.swell.post(COLLECTION, { ...next, data_source: null });
 }
 
-/** Every market gets its own API data source before the first product is sent there. */
+interface GoogleDataSource {
+  name: string;
+  displayName?: string;
+  primaryProductDataSource?: { feedLabel?: string; contentLanguage?: string };
+}
+
+/** The app's own data source for a market, left in Google by an earlier connection. */
+function findOwn(list: GoogleDataSource[], market: Market): GoogleDataSource | undefined {
+  return list.find(
+    (ds) =>
+      ds.displayName === dataSourceName(market) &&
+      ds.primaryProductDataSource?.feedLabel === market.country &&
+      ds.primaryProductDataSource?.contentLanguage === market.language,
+  );
+}
+
+/**
+ * Every market gets its own API data source before the first product is sent
+ * there: the app's existing one when Google has it, otherwise a new one.
+ */
 export async function ensureDataSources(ctx: AppContext, token: string, accountId: string, markets: Market[]): Promise<Market[]> {
   const ready: Market[] = [];
+  let existing: GoogleDataSource[] | null = null;
   for (const market of markets) {
     if (market.data_source) {
       ready.push(market);
       continue;
     }
-    const created = await googleCall<{ name: string }>(ctx.fetch, token, createDataSource(accountId, market));
-    ready.push(await ctx.swell.put(`${COLLECTION}/${market.id}`, { data_source: created.name }));
+    existing ??= (await googleCall<{ dataSources?: GoogleDataSource[] }>(ctx.fetch, token, listDataSources(accountId))).dataSources ?? [];
+    let name = findOwn(existing, market)?.name;
+    if (!name) {
+      name = (await googleCall<{ name: string }>(ctx.fetch, token, createDataSource(accountId, market))).name;
+      // Another run may have stored one meanwhile: keep that one and drop ours.
+      const current: Market | null = await ctx.swell.get(`${COLLECTION}/${market.id}`);
+      if (current?.data_source && current.data_source !== name) {
+        await dropDataSource(ctx, token, name);
+        ready.push(current);
+        continue;
+      }
+    }
+    ready.push(await ctx.swell.put(`${COLLECTION}/${market.id}`, { data_source: name }));
   }
   return ready;
 }

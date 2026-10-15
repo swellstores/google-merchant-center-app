@@ -52,7 +52,40 @@ describe('ensureDataSources', () => {
     const [market] = await ensureDataSources(ctx, 'tok', '123', await loadMarkets(swell));
     expect(market.data_source).toBe('accounts/123/dataSources/1');
     expect((await loadMarkets(swell))[0].data_source).toBe('accounts/123/dataSources/1');
-    expect(google.requests[0].body).toMatchObject({ primaryProductDataSource: { feedLabel: 'US', contentLanguage: 'en', countries: ['US'] } });
+    expect(google.requests.find((r) => r.method === 'POST')!.body).toMatchObject({ primaryProductDataSource: { feedLabel: 'US', contentLanguage: 'en', countries: ['US'] } });
+  });
+
+  it('adopts the app\'s data source left in Google by an earlier connection', async () => {
+    const google = createFakeGoogle();
+    google.addDataSource({ name: 'accounts/123/dataSources/9', displayName: 'Swell — US en', primaryProductDataSource: { feedLabel: 'US', contentLanguage: 'en' } });
+    const { swell } = createFakeSwell({ markets: [US] });
+    const [market] = await ensureDataSources(testContext(swell, google.fetch), 'tok', '123', await loadMarkets(swell));
+    expect(market.data_source).toBe('accounts/123/dataSources/9');
+    expect((await loadMarkets(swell))[0].data_source).toBe('accounts/123/dataSources/9');
+    expect(google.requests.some((r) => r.method === 'POST')).toBe(false);
+  });
+
+  it('ignores a data source with another name', async () => {
+    const google = createFakeGoogle();
+    google.addDataSource({ name: 'accounts/123/dataSources/9', displayName: 'Feed from elsewhere', primaryProductDataSource: { feedLabel: 'US', contentLanguage: 'en' } });
+    const { swell } = createFakeSwell({ markets: [US] });
+    const [market] = await ensureDataSources(testContext(swell, google.fetch), 'tok', '123', await loadMarkets(swell));
+    expect(market.data_source).toBe('accounts/123/dataSources/1');
+  });
+
+  it('keeps the data source another run stored meanwhile and drops its own', async () => {
+    const google = createFakeGoogle();
+    const { swell, collections } = createFakeSwell({ markets: [US] });
+    const fetchWithRace = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const res = await google.fetch(input, init);
+      if (init?.method === 'POST' && String(input).includes('/datasources/v1/accounts/123/dataSources')) {
+        collections['/markets'][0].data_source = 'accounts/123/dataSources/77';
+      }
+      return res;
+    }) as typeof fetch;
+    const [market] = await ensureDataSources(testContext(swell, fetchWithRace), 'tok', '123', await loadMarkets(swell));
+    expect(market.data_source).toBe('accounts/123/dataSources/77');
+    expect(google.dataSources.has('accounts/123/dataSources/1')).toBe(false);
   });
 
   it('leaves markets that have one alone', async () => {

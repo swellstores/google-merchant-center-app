@@ -64,12 +64,20 @@ export const listQuotas = (accountId: string): GoogleCall => ({
   query: { pageSize: '1000' },
 });
 
+export const dataSourceName = (market: { country: string; language: string }) => `Swell — ${market.country} ${market.language}`;
+
+export const listDataSources = (accountId: string): GoogleCall => ({
+  method: 'GET',
+  path: `/datasources/v1/${account(accountId)}/dataSources`,
+  query: { pageSize: '1000' },
+});
+
 export function createDataSource(accountId: string, market: { country: string; language: string }): GoogleCall {
   return {
     method: 'POST',
     path: `/datasources/v1/${account(accountId)}/dataSources`,
     body: {
-      displayName: `Swell — ${market.country} ${market.language}`,
+      displayName: dataSourceName(market),
       primaryProductDataSource: { feedLabel: market.country, contentLanguage: market.language, countries: [market.country] },
     },
   };

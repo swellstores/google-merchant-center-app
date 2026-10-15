@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   createDataSource,
+  dataSourceName,
   deleteDataSource,
   deleteProductInput,
   getAccount,
   getHomepage,
   insertProductInput,
+  listDataSources,
   listQuotas,
   patchProductInput,
   productInputId,
@@ -52,6 +54,8 @@ describe('merchant calls', () => {
         primaryProductDataSource: { feedLabel: 'US', contentLanguage: 'en', countries: ['US'] },
       },
     });
+    expect(dataSourceName({ country: 'US', language: 'en' })).toBe('Swell — US en');
+    expect(listDataSources('123')).toEqual({ method: 'GET', path: '/datasources/v1/accounts/123/dataSources', query: { pageSize: '1000' } });
     expect(deleteDataSource('accounts/123/dataSources/9')).toEqual({
       method: 'DELETE',
       path: '/datasources/v1/accounts/123/dataSources/9',
