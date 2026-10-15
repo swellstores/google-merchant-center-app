@@ -6,7 +6,7 @@ import { setAlarm } from '../sync/alarm';
 import { startFullSync } from '../sync/full-sync';
 import { clearQueue } from '../sync/queue';
 import { loadState, saveState } from '../sync/state';
-import { runChecks, type CheckReport } from './checks';
+import { runChecks } from './checks';
 import { languageOf, loadMarkets, replaceMarket, type Market } from './markets';
 import { keyOf, loadConnection, parseServiceAccountKey, publicConnection, saveConnection, type PublicConnection } from './store';
 import { accessTokenFor } from './token';
@@ -72,9 +72,11 @@ export async function connect(ctx: AppContext, input: ConnectInput) {
     return { connection: publicConnection(connection), market: (await loadMarkets(ctx.swell))[0] ?? null, report };
   }
 
-  if (existing?.merchant_id && existing.merchant_id !== input.merchant_id) {
-    // Data sources belong to the previous account.
-    for (const market of await loadMarkets(ctx.swell)) await ctx.swell.put(`/markets/${market.id}`, { data_source: null });
+  // Data source names carry their account; any other account's are stale.
+  for (const market of await loadMarkets(ctx.swell)) {
+    if (market.data_source && !market.data_source.startsWith(`accounts/${input.merchant_id}/`)) {
+      await ctx.swell.put(`/markets/${market.id}`, { data_source: null });
+    }
   }
   const details = await ctx.swell.get('/:details');
   const market = await replaceMarket(ctx, token.token, {

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { connect, connectionStatus, disconnect } from '../../../functions/lib/connection/connect';
 import { loadMarkets } from '../../../functions/lib/connection/markets';
-import { loadConnection } from '../../../functions/lib/connection/store';
+import { loadConnection, saveConnection } from '../../../functions/lib/connection/store';
 import { AppError } from '../../../functions/lib/context';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
 import { loadAlarm } from '../../../functions/lib/sync/alarm';
@@ -68,6 +68,22 @@ describe('connect', () => {
     expect(again.report.ok).toBe(true);
   });
 
+  it("drops another account's data source after a failed attempt", async () => {
+    const fake = createFakeSwell({
+      products: [{ id: 'p1' }],
+      markets: [{ country: 'US', language: 'en', currency: 'USD', link_template: 'https://shop.example.com/products/{slug}', data_source: 'accounts/999/dataSources/1' }],
+    });
+    await saveConnection(fake.swell, null, {
+      status: 'connected', merchant_id: '999', client_email: key.client_email, private_key: key.private_key,
+      private_key_id: key.private_key_id ?? null, project_id: key.project_id ?? null,
+    });
+    const failing = createFakeGoogle({ homepage: { claimed: false } });
+    expect((await connect(testContext(fake.swell, failing.fetch), INPUT())).report.ok).toBe(false);
+    const working = createFakeGoogle();
+    expect((await connect(testContext(fake.swell, working.fetch), INPUT())).report.ok).toBe(true);
+    expect((await loadMarkets(fake.swell))[0].data_source).toBeNull();
+  });
+
   it.each([
     [{ key: undefined }, 'key_required'],
     [{ merchant_id: 'abc' }, 'invalid_merchant_id'],
@@ -111,5 +127,28 @@ describe('disconnect', () => {
     google.dataSources.add('accounts/123/dataSources/1');
     await disconnect(ctx, false);
     expect(google.dataSources.size).toBe(1);
+  });
+
+  it('treats an already deleted data source as removed', async () => {
+    const { ctx, swell } = setup();
+    await connect(ctx, INPUT());
+    const [market] = await loadMarkets(swell);
+    await swell.put(`/markets/${market.id}`, { data_source: 'accounts/123/dataSources/1' });
+    await disconnect(ctx, true);
+    expect(await loadConnection(swell)).toMatchObject({ status: 'disconnected', last_error: null });
+  });
+
+  it('records why the products could not be removed and still disconnects', async () => {
+    const { ctx, swell } = setup();
+    await connect(ctx, INPUT());
+    const [market] = await loadMarkets(swell);
+    await swell.put(`/markets/${market.id}`, { data_source: 'accounts/123/dataSources/1' });
+    const connection = await loadConnection(swell);
+    await saveConnection(swell, connection!.id, { access_token: null, access_token_expires: null });
+    const broken = createFakeGoogle({ token: { status: 400, body: { error: 'invalid_grant', error_description: 'Invalid JWT Signature.' } } });
+    await disconnect(testContext(swell, broken.fetch), true);
+    const after = await loadConnection(swell);
+    expect(after).toMatchObject({ status: 'disconnected', private_key: null });
+    expect(after?.last_error).toContain('Products could not be removed from Google');
   });
 });

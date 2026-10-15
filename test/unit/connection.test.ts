@@ -36,6 +36,10 @@ describe('connection route', () => {
     expect(await res.json()).toEqual({ error: { code: 'key_required', message: expect.any(String) } });
   });
 
+  it('refuses a POST that is not from an admin component', async () => {
+    await expect(route.post(request('POST', { op: 'disconnect' }, null))).rejects.toMatchObject({ status: 403 });
+  });
+
   it('answers an unknown operation with 400', async () => {
     const res = (await route.post(request('POST', { op: 'explode' }))) as Response;
     expect(res.status).toBe(400);
