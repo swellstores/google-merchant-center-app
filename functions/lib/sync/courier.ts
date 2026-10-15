@@ -96,6 +96,13 @@ export async function runCourier(ctx: AppContext): Promise<CourierOutcome> {
   if (state.running_since && now - Date.parse(state.running_since) < RUNNING_TTL_MS) return { next: 'busy', sent: 0 };
 
   await saveState(ctx.swell, state.id, { running_since: iso(now) });
+  // A run killed at 10 s leaves no future run; this one comes after the mark
+  // expires and finds the next run already working (busy/early) or picks the
+  // work up. The ending's alarm write supersedes it in wake_at. A run with
+  // nothing to do leaves none, or each run would schedule the next forever.
+  if (state.full_sync?.status === 'running' || (await queueCount(ctx.swell)) > 0) {
+    await setAlarm(ctx, now + RUNNING_TTL_MS + 5000);
+  }
   let result: Awaited<ReturnType<typeof work>>;
   try {
     result = await work(ctx, connection, state, budget);
@@ -109,10 +116,14 @@ export async function runCourier(ctx: AppContext): Promise<CourierOutcome> {
     result = { sent: 0, failure: error, queueMore: true, job: state.full_sync };
   }
 
-  const { sent, failure, queueMore, job } = result;
-  const end = ctx.now();
+  const { sent, failure, queueMore } = result;
   const patch: Record<string, unknown> = { running_since: null };
-  if (job !== state.full_sync) patch.full_sync = { $set: job };
+  // A catalog sync started or stopped during the run (connect, disconnect) wins over the run's job.
+  const stored = (await loadState(ctx.swell)).full_sync;
+  const ours = stored?.date_started === state.full_sync?.date_started;
+  const job = ours ? result.job : stored;
+  if (ours && job !== state.full_sync) patch.full_sync = { $set: job };
+  const end = ctx.now();
 
   if (failure?.kind === 'auth') {
     await saveState(ctx.swell, state.id, { ...patch, not_before: null, last_error: failure.message });

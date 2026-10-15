@@ -82,6 +82,20 @@ describe('runCourier', () => {
     expect(await queueCount(swell)).toBe(1);
   });
 
+  it('leaves a dead-man alarm while it works', async () => {
+    const { ctx, swell } = setup();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    await runCourier(ctx);
+    const alarmWrites = swell.put.mock.calls.filter(([url]) => url.startsWith('/alarms/')).map(([, patch]) => patch.wake_at);
+    expect(alarmWrites).toEqual([at(NOW + 35_000), null]);
+  });
+
+  it('leaves no dead-man alarm when there is nothing to do', async () => {
+    const { ctx, swell } = setup();
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 0 });
+    expect(swell.put.mock.calls.filter(([url]) => url.startsWith('/alarms/'))).toEqual([]);
+  });
+
   it('releases the run mark and re-arms after an unexpected error', async () => {
     const { ctx, swell } = setup();
     await enqueue(swell, { productId: 'p1', kind: 'full' });
@@ -125,6 +139,21 @@ describe('runCourier', () => {
     expect(google.inputs.size).toBe(1);
     expect((await loadState(swell)).full_sync).toMatchObject({ status: 'done', done: 1 });
     expect((await loadAlarm(swell)).wake_at).toBeNull();
+  });
+
+  it('keeps a catalog sync started while it was running', async () => {
+    const { ctx, swell } = setup();
+    const state = await loadState(swell);
+    await saveState(swell, state.id, { full_sync: { $set: { status: 'running', cursor: null, total: 1, done: 0, date_started: at(NOW - 60_000) } } });
+    const restarted = { status: 'running', cursor: null, total: 1, done: 0, date_started: at(NOW) };
+    const get = swell.get;
+    let pages = 0;
+    swell.get = (async (url: string, query?: any) => {
+      if (url === '/products' && query?.fields === 'id' && ++pages === 1) await saveState(swell, state.id, { full_sync: { $set: restarted } });
+      return get(url, query);
+    }) as typeof get;
+    expect((await runCourier(ctx)).next).toBe('soon');
+    expect((await loadState(swell)).full_sync).toEqual(restarted);
   });
 
   it('backs off after a rate limit and keeps the queue', async () => {
