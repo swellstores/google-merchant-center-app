@@ -1,0 +1,138 @@
+import { describe, expect, it } from 'vitest';
+import type { Market } from '../../../functions/lib/connection/markets';
+import { deliver, type DeliveryEnv } from '../../../functions/lib/sync/deliver';
+import type { WorkUnit } from '../../../functions/lib/sync/queue';
+import { Budget } from '../../../functions/lib/time';
+import { APP_ID, fixedClock, steppingClock, testContext } from '../../helpers/context';
+import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
+import { createFakeSwell } from '../../helpers/fake-swell';
+
+const DS = 'accounts/123/dataSources/1';
+const MARKET: Market = { id: 'm1', country: 'US', language: 'en', currency: 'USD', link_template: 'https://shop.example.com/products/{slug}', data_source: DS };
+const img = (url: string) => ({ file: { url } });
+const mug = (extra: Record<string, any> = {}) => ({
+  id: 'p1', name: 'Mug', slug: 'mug', active: true, price: 12, images: [img('https://cdn.example.com/mug.jpg')], ...extra,
+});
+const unit = (productId: string, kind: WorkUnit['kind'] = 'full', extra: Partial<WorkUnit> = {}): WorkUnit => ({
+  productId, kind, inputIds: [], queueItemIds: [`q-${productId}`], attempts: 0, ...extra,
+});
+
+function setup(products: Record<string, any>[], googleOptions: FakeGoogleOptions = {}, clock = fixedClock()) {
+  const google = createFakeGoogle(googleOptions);
+  const { swell, collections } = createFakeSwell({ products });
+  const ctx = testContext(swell, google.fetch, clock);
+  const env: DeliveryEnv = { ctx, accountId: '123', token: 'tok', markets: [MARKET], defaults: { condition: 'new' }, budget: new Budget(clock, 7000) };
+  const appFields = (id: string) => collections['/products'].find((p) => p.id === id)?.$app?.[APP_ID];
+  return { google, env, appFields };
+}
+
+describe('deliver', () => {
+  it('inserts a new product and records what it sent', async () => {
+    const { google, env, appFields } = setup([mug()]);
+    const report = await deliver(env, [unit('p1')]);
+    expect(report.done.map((u) => u.productId)).toEqual(['p1']);
+    expect(report.sentOps).toBe(1);
+    expect(google.inputs.get(`${DS}|en~US~p1`)?.productAttributes.title).toBe('Mug');
+    expect(appFields('p1')).toMatchObject({ sync_state: 'sent', sync_error: null, input_ids: ['en~US~p1'] });
+  });
+
+  it('patches price and availability of an offer sent before', async () => {
+    const { google, env } = setup([mug({ price: 9, $app: { [APP_ID]: { input_ids: ['en~US~p1'] } } })]);
+    google.inputs.set(`${DS}|en~US~p1`, { offerId: 'p1', productAttributes: { title: 'Mug', price: { amountMicros: '12000000', currencyCode: 'USD' } } });
+    await deliver(env, [unit('p1', 'light')]);
+    const patch = google.requests.find((r) => r.method === 'PATCH')!;
+    expect(patch.path).toContain('updateMask=productAttributes.price%2CproductAttributes.salePrice%2CproductAttributes.availability');
+    expect(google.inputs.get(`${DS}|en~US~p1`)?.productAttributes).toMatchObject({ title: 'Mug', price: { amountMicros: '9000000' } });
+  });
+
+  it('inserts instead of patching an offer Google never got', async () => {
+    const { google, env } = setup([mug()]);
+    await deliver(env, [unit('p1', 'light')]);
+    expect(google.requests.map((r) => r.method)).toEqual(['POST']);
+  });
+
+  it('keeps a light unit as full when Google no longer has the offer', async () => {
+    const { env } = setup([mug({ $app: { [APP_ID]: { input_ids: ['en~US~p1'] } } })]);
+    const report = await deliver(env, [unit('p1', 'light')]);
+    expect(report.kept).toEqual([expect.objectContaining({ productId: 'p1', kind: 'full' })]);
+  });
+
+  it('deletes the offer of a removed variant', async () => {
+    const product = mug({
+      variants: { results: [{ id: 'v1', name: 'Red', active: true }] },
+      $app: { [APP_ID]: { input_ids: ['en~US~v1', 'en~US~v2'] } },
+    });
+    const { google, env, appFields } = setup([product]);
+    google.inputs.set(`${DS}|en~US~v2`, {});
+    await deliver(env, [unit('p1')]);
+    expect(google.inputs.has(`${DS}|en~US~v2`)).toBe(false);
+    expect(appFields('p1').input_ids).toEqual(['en~US~v1']);
+  });
+
+  it('deletes every offer of a product hidden from Google', async () => {
+    const { google, env, appFields } = setup([mug({ $app: { [APP_ID]: { excluded: true, input_ids: ['en~US~p1'] } } })]);
+    google.inputs.set(`${DS}|en~US~p1`, {});
+    await deliver(env, [unit('p1')]);
+    expect(google.inputs.size).toBe(0);
+    expect(appFields('p1')).toMatchObject({ sync_state: 'skipped', sync_reason: 'excluded', input_ids: [] });
+  });
+
+  it('deletes the inputs of a deleted product without writing to it', async () => {
+    const { google, env } = setup([]);
+    google.inputs.set(`${DS}|en~US~v1`, {});
+    const report = await deliver(env, [unit('gone', 'delete', { inputIds: ['en~US~v1', 'en~US~missing'] })]);
+    expect(google.inputs.size).toBe(0);
+    expect(report.done).toHaveLength(1);
+  });
+
+  it('records a rejected offer as an error and finishes the unit', async () => {
+    const reject = { status: 400, body: { error: { code: 400, message: 'Invalid GTIN' } } };
+    const { env, appFields } = setup([mug()], { offerErrors: { p1: reject } });
+    const report = await deliver(env, [unit('p1')]);
+    expect(report.done).toHaveLength(1);
+    expect(appFields('p1')).toMatchObject({ sync_state: 'error', sync_error: 'Invalid GTIN', input_ids: [] });
+  });
+
+  it('keeps a unit whose offer was rate limited and finishes the others', async () => {
+    const rate = { status: 429, body: { error: { message: 'quota/request_rate_too_high' } } };
+    const { env } = setup([mug(), mug({ id: 'p2', slug: 'p2' })], { offerErrors: { p2: rate } });
+    const report = await deliver(env, [unit('p1'), unit('p2')]);
+    expect(report.done.map((u) => u.productId)).toEqual(['p1']);
+    expect(report.kept.map((u) => u.productId)).toEqual(['p2']);
+    expect(report.failure).toBeUndefined();
+  });
+
+  it('keeps every unit when the whole batch is rate limited', async () => {
+    const { env, appFields } = setup([mug()], { batch: { status: 429, body: { error: { message: 'quota/request_rate_too_high' } } } });
+    const report = await deliver(env, [unit('p1')]);
+    expect(report.done).toHaveLength(0);
+    expect(report.kept).toHaveLength(1);
+    expect(report.failure?.kind).toBe('rate');
+    expect(appFields('p1')).toBeUndefined();
+  });
+
+  it('reports an auth failure of a part as the run’s failure', async () => {
+    const { env } = setup([mug()], { offerErrors: { p1: { status: 401, body: { error: { message: 'Request had invalid credentials' } } } } });
+    const report = await deliver(env, [unit('p1')]);
+    expect(report.failure?.kind).toBe('auth');
+    expect(report.kept).toHaveLength(1);
+  });
+
+  it('splits a product with more than 100 offers', async () => {
+    const variants = Array.from({ length: 120 }, (_, i) => ({ id: `v${i}`, name: `V${i}`, active: true }));
+    const { google, env, appFields } = setup([mug({ variants: { results: variants } })]);
+    const report = await deliver(env, [unit('p1')]);
+    expect(google.batches()).toBe(2);
+    expect(report.done).toHaveLength(1);
+    expect(appFields('p1').input_ids).toHaveLength(120);
+  });
+
+  it('keeps what it had no time to send', async () => {
+    const variants = Array.from({ length: 120 }, (_, i) => ({ id: `v${i}`, name: `V${i}`, active: true }));
+    // Each clock read moves 2 s: the second batch starts past the reserve.
+    const { google, env } = setup([mug({ variants: { results: variants } })], {}, steppingClock(undefined, 2000));
+    const report = await deliver(env, [unit('p1')]);
+    expect(google.batches()).toBe(1);
+    expect(report.kept).toHaveLength(1);
+  });
+});

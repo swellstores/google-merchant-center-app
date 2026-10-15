@@ -1,0 +1,198 @@
+import type { Market } from '../connection/markets';
+import type { AppContext } from '../context';
+import { MAX_BATCH_PARTS, sendBatch, type BatchPart, type BatchResult } from '../google/batch';
+import { classifyGoogleError, errorMessage, GoogleApiError } from '../google/http';
+import { deleteProductInput, insertProductInput, patchProductInput, type ProductAttributes } from '../google/merchant';
+import { buildOffers, marketOfInput, parseInputId, type OfferDefaults, type SkipReason } from '../mapping/offers';
+import type { GoogleFields, SwellProduct } from '../mapping/types';
+import { iso, type Budget } from '../time';
+import type { WorkUnit } from './queue';
+
+export interface DeliveryEnv {
+  ctx: AppContext;
+  accountId: string;
+  token: string;
+  /** Markets with a data source */
+  markets: Market[];
+  defaults: OfferDefaults;
+  budget: Budget;
+}
+
+export interface DeliveryReport {
+  done: WorkUnit[];
+  kept: WorkUnit[];
+  sentOps: number;
+  /** Stops the run: auth, daily quota, or a whole batch that failed */
+  failure?: GoogleApiError;
+}
+
+/** Time a batch needs, so the run never starts one it cannot finish. */
+export const SEND_RESERVE_MS = 2500;
+export const LIGHT_MASK: (keyof ProductAttributes)[] = ['price', 'salePrice', 'availability'];
+
+const WRITE_CONCURRENCY = 10;
+
+interface Op {
+  kind: 'insert' | 'patch' | 'delete';
+  inputId: string;
+  part: BatchPart;
+}
+
+interface Plan {
+  unit: WorkUnit;
+  product: SwellProduct | null;
+  skipped: SkipReason | null;
+  ops: Op[];
+}
+
+async function readProducts(env: DeliveryEnv, ids: string[]): Promise<Map<string, SwellProduct>> {
+  if (!ids.length) return new Map();
+  const list = await env.ctx.swell.get('/products', { where: { id: { $in: ids } }, expand: ['variants:1000'], limit: ids.length });
+  return new Map((list?.results ?? []).map((p: SwellProduct): [string, SwellProduct] => [p.id, p]));
+}
+
+function planUnit(env: DeliveryEnv, unit: WorkUnit, product: SwellProduct | null): Plan {
+  const ops: Op[] = [];
+  const partId = () => `${unit.productId}-${ops.length}`;
+  const addDelete = (inputId: string) => {
+    const dataSource = marketOfInput(env.markets, inputId)?.data_source;
+    if (!dataSource) return;
+    ops.push({ kind: 'delete', inputId, part: { id: partId(), call: deleteProductInput(env.accountId, dataSource, parseInputId(inputId)) } });
+  };
+
+  if (unit.kind === 'delete' || !product) {
+    unit.inputIds.forEach(addDelete);
+    return { unit, product: null, skipped: null, ops };
+  }
+
+  const fields: GoogleFields = product.$app?.[env.ctx.appId] ?? {};
+  const previous = fields.input_ids ?? [];
+  const build = buildOffers(product, env.markets, { appId: env.ctx.appId, defaults: env.defaults, version: String(env.ctx.now()) });
+  for (const offer of build.offers) {
+    const dataSource = offer.market.data_source!;
+    const light = unit.kind === 'light' && previous.includes(offer.inputId);
+    ops.push({
+      kind: light ? 'patch' : 'insert',
+      inputId: offer.inputId,
+      part: {
+        id: partId(),
+        call: light
+          ? patchProductInput(env.accountId, dataSource, offer.input, LIGHT_MASK)
+          : insertProductInput(env.accountId, dataSource, offer.input),
+      },
+    });
+  }
+  const current = new Set(build.offers.map((offer) => offer.inputId));
+  previous.filter((id) => !current.has(id)).forEach(addDelete);
+  return { unit, product, skipped: build.skipped, ops };
+}
+
+interface Settled {
+  keep: boolean;
+  upgrade?: boolean;
+  error?: string;
+  fatal?: GoogleApiError;
+  fields?: GoogleFields;
+}
+
+function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResult>): Settled {
+  const sent: string[] = [];
+  const stillThere: string[] = [];
+  const errors: string[] = [];
+  let keep = false;
+  let upgrade = false;
+  let fatal: GoogleApiError | undefined;
+
+  for (const op of plan.ops) {
+    const result = results.get(op.part.id);
+    if (!result) {
+      keep = true;
+      continue;
+    }
+    if (result.status >= 200 && result.status < 300) {
+      if (op.kind !== 'delete') sent.push(op.inputId);
+      continue;
+    }
+    const kind = classifyGoogleError(result.status, result.body);
+    const message = errorMessage(result.body, result.status);
+    if (op.kind === 'delete' && kind === 'not_found') continue;
+    if (op.kind === 'patch' && kind === 'not_found') {
+      keep = true;
+      upgrade = true;
+      continue;
+    }
+    if (kind === 'auth' || kind === 'daily_quota') {
+      fatal ??= new GoogleApiError(kind, result.status, message, result.body);
+      keep = true;
+      continue;
+    }
+    if (kind === 'rate' || kind === 'server') {
+      keep = true;
+      errors.push(message);
+      continue;
+    }
+    errors.push(message);
+    if (op.kind === 'delete') stillThere.push(op.inputId);
+  }
+
+  if (keep) return { keep, upgrade, error: errors[0] ?? null, fatal };
+  if (!plan.product) return { keep: false };
+  const date_synced = iso(env.ctx.now());
+  if (plan.skipped) {
+    return { keep: false, fields: { sync_state: 'skipped', sync_reason: plan.skipped, sync_error: errors[0] ?? null, input_ids: stillThere, date_synced } };
+  }
+  return {
+    keep: false,
+    fields: {
+      sync_state: errors.length ? 'error' : 'sent',
+      sync_reason: null,
+      sync_error: errors[0] ?? null,
+      input_ids: [...sent, ...stillThere],
+      date_synced,
+    },
+  };
+}
+
+/**
+ * Sends the units' offers in batches of at most 100 while the budget lasts and
+ * sorts each unit into done or kept. A unit is done only when Google answered
+ * every one of its calls with something final.
+ */
+export async function deliver(env: DeliveryEnv, units: WorkUnit[]): Promise<DeliveryReport> {
+  const products = await readProducts(env, units.filter((u) => u.kind !== 'delete').map((u) => u.productId));
+  const plans = units.map((unit) => planUnit(env, unit, products.get(unit.productId) ?? null));
+  const ops = plans.flatMap((plan) => plan.ops);
+
+  const results = new Map<string, BatchResult>();
+  let failure: GoogleApiError | undefined;
+  for (let i = 0; i < ops.length && !failure; i += MAX_BATCH_PARTS) {
+    if (!env.budget.has(SEND_RESERVE_MS)) break;
+    try {
+      const answers = await sendBatch(env.ctx.fetch, env.token, ops.slice(i, i + MAX_BATCH_PARTS).map((op) => op.part));
+      for (const answer of answers) results.set(answer.id, answer);
+    } catch (error) {
+      if (!(error instanceof GoogleApiError)) throw error;
+      failure = error;
+    }
+  }
+
+  const report: DeliveryReport = { done: [], kept: [], sentOps: results.size, failure };
+  const writes: [string, GoogleFields][] = [];
+  for (const plan of plans) {
+    const settled = settlePlan(env, plan, results);
+    if (settled.fatal && !report.failure) report.failure = settled.fatal;
+    if (settled.keep) {
+      report.kept.push({ ...plan.unit, kind: settled.upgrade ? 'full' : plan.unit.kind, error: settled.error ?? null });
+      continue;
+    }
+    report.done.push(plan.unit);
+    if (plan.product && settled.fields) writes.push([plan.product.id, settled.fields]);
+  }
+
+  for (let i = 0; i < writes.length; i += WRITE_CONCURRENCY) {
+    await Promise.all(
+      writes.slice(i, i + WRITE_CONCURRENCY).map(([id, fields]) => env.ctx.swell.put(`/products/${id}`, { $app: { [env.ctx.appId]: fields } })),
+    );
+  }
+  return report;
+}
