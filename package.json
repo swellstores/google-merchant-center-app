@@ -13,8 +13,5 @@
     "typecheck": "([ -z \"$(find functions -name '*.ts' 2>/dev/null | head -1)\" ] || tsc --noEmit) && ([ ! -f test/tsconfig.json ] || tsc --build --noEmit test) && ([ ! -f components/tsconfig.json ] || tsc --noEmit -p components)",
     "test": "vitest run"
   },
-  "version": "1.0.0",
-  "workspaces": [
-    "frontend"
-  ]
+  "version": "1.0.0"
 }
