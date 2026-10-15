@@ -62,6 +62,31 @@ describe('takeQueue and unitsFromQueue', () => {
 });
 
 describe('settleQueue', () => {
+  it('records progress and counts no attempt when a kept unit progressed', async () => {
+    const { swell, collections } = createFakeSwell();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    collections['/queue-items'][0].attempts = 3;
+    const [unit] = unitsFromQueue(await takeQueue(swell, 10));
+    await settleQueue(testContext(swell), [], [{ ...unit, progress: ['en~US~v1'] }]);
+    expect(collections['/queue-items'][0]).toMatchObject({ done_input_ids: ['en~US~v1'], attempts: 0 });
+  });
+
+  it('forgets progress when the product changes', async () => {
+    const { swell, collections } = createFakeSwell();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    collections['/queue-items'][0].done_input_ids = ['x'];
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    expect(collections['/queue-items'][0].done_input_ids).toEqual([]);
+  });
+
+  it('carries done ids into the unit', () => {
+    const items = [
+      { id: 'a', product_id: 'p1', kind: 'full' as const, done_input_ids: ['x', 'y'] },
+      { id: 'b', product_id: 'p1', kind: 'full' as const, done_input_ids: ['y', 'z'] },
+    ];
+    expect(unitsFromQueue(items)[0].doneInputIds).toEqual(['x', 'y', 'z']);
+  });
+
   it('removes finished items and counts an attempt on kept ones', async () => {
     const { swell, collections } = createFakeSwell({ products: [{ id: 'p2', name: 'Kept' }] });
     await enqueue(swell, { productId: 'p1', kind: 'full' });

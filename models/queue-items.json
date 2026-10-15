@@ -7,6 +7,7 @@
     "product_id": { "type": "string", "required": true },
     "kind": { "type": "string", "enum": ["full", "light", "delete"], "required": true },
     "input_ids": { "type": "array", "value_type": "string", "description": "Product inputs to delete when the product itself is gone" },
+    "done_input_ids": { "type": "array", "value_type": "string", "description": "Inputs already sent for this revision of the product, so a product too big for one run continues where it stopped" },
     "attempts": { "type": "int", "default": 0 },
     "last_error": { "type": "string" },
     "revision": { "type": "int", "default": 0, "description": "Bumped on every change, so the courier never removes an item edited while it was being sent" }

@@ -134,5 +134,46 @@ describe('deliver', () => {
     const report = await deliver(env, [unit('p1')]);
     expect(google.batches()).toBe(1);
     expect(report.kept).toHaveLength(1);
+    expect(report.kept[0].progress).toHaveLength(100);
+  });
+
+  it('keeps the id of an offer Google still holds after a rejected update', async () => {
+    const reject = { status: 400, body: { error: { code: 400, message: 'Invalid GTIN' } } };
+    const { google, env, appFields } = setup([mug({ $app: { [APP_ID]: { input_ids: ['en~US~p1'] } } })], { offerErrors: { p1: reject } });
+    google.inputs.set(`${DS}|en~US~p1`, {});
+    const report = await deliver(env, [unit('p1')]);
+    expect(report.done).toHaveLength(1);
+    expect(appFields('p1')).toMatchObject({ sync_state: 'error', input_ids: ['en~US~p1'] });
+  });
+
+  it('survives a failed product write', async () => {
+    const { env } = setup([mug()]);
+    const put = env.ctx.swell.put;
+    env.ctx.swell.put = (async (url: string, data: any) => {
+      if (url === '/products/p1') throw new Error('write failed');
+      return put(url, data);
+    }) as typeof put;
+    const report = await deliver(env, [unit('p1')]);
+    expect(report.done.map((u) => u.productId)).toEqual(['p1']);
+  });
+
+  it('reports units it never reached as untouched', async () => {
+    const variants = Array.from({ length: 120 }, (_, i) => ({ id: `v${i}`, name: `V${i}`, active: true }));
+    const { env } = setup([mug({ variants: { results: variants } }), mug({ id: 'p2', slug: 'p2' })], {}, steppingClock(undefined, 1400));
+    const report = await deliver(env, [unit('p1'), unit('p2')]);
+    expect(report.kept.map((u) => u.productId)).toEqual(['p1']);
+    expect(report.kept[0].progress).toHaveLength(100);
+    expect(report.untouched.map((u) => u.productId)).toEqual(['p2']);
+  });
+
+  it('skips offers sent earlier in this revision', async () => {
+    const variants = Array.from({ length: 120 }, (_, i) => ({ id: `v${i}`, name: `V${i}`, active: true }));
+    const { google, env, appFields } = setup([mug({ variants: { results: variants } })]);
+    const doneInputIds = variants.slice(0, 100).map((v) => `en~US~${v.id}`);
+    const report = await deliver(env, [unit('p1', 'full', { doneInputIds })]);
+    expect(google.batches()).toBe(1);
+    expect(google.requests.filter((r) => r.method === 'POST')).toHaveLength(20);
+    expect(report.done).toHaveLength(1);
+    expect(appFields('p1').input_ids).toHaveLength(120);
   });
 });

@@ -8,6 +8,7 @@ export interface QueueItem {
   product_id: string;
   kind: QueueKind;
   input_ids?: string[];
+  done_input_ids?: string[];
   attempts?: number;
   last_error?: string | null;
   revision?: number;
@@ -24,6 +25,10 @@ export interface WorkUnit {
   error?: string | null;
   /** Queue item id → the revision taken, to tell later edits apart. */
   revisions?: Record<string, number>;
+  /** Inputs sent in earlier runs of this revision. */
+  doneInputIds?: string[];
+  /** Inputs sent OK in this run, on kept units. */
+  progress?: string[];
 }
 
 export const MAX_ATTEMPTS = 8;
@@ -48,6 +53,7 @@ export async function enqueue(swell: SwellClient, plan: { productId: string; kin
   await swell.put(`${COLLECTION}/${current.id}`, {
     kind: mergeKind(current.kind, plan.kind),
     revision: (current.revision ?? 0) + 1,
+    done_input_ids: [],
     ...(plan.inputIds?.length ? { input_ids: [...new Set([...(current.input_ids ?? []), ...plan.inputIds])] } : {}),
   });
 }
@@ -74,6 +80,7 @@ export function unitsFromQueue(items: QueueItem[]): WorkUnit[] {
         queueItemIds: [item.id],
         attempts: item.attempts ?? 0,
         revisions: { [item.id]: item.revision ?? 0 },
+        doneInputIds: [...(item.done_input_ids ?? [])],
       });
       continue;
     }
@@ -82,6 +89,7 @@ export function unitsFromQueue(items: QueueItem[]): WorkUnit[] {
     unit.queueItemIds.push(item.id);
     unit.attempts = Math.max(unit.attempts, item.attempts ?? 0);
     unit.revisions![item.id] = item.revision ?? 0;
+    unit.doneInputIds = [...new Set([...(unit.doneInputIds ?? []), ...(item.done_input_ids ?? [])])];
   }
   return [...byProduct.values()];
 }
@@ -114,7 +122,8 @@ export async function settleQueue(ctx: AppContext, done: WorkUnit[], kept: WorkU
   for (const unit of kept) {
     const ids = unit.queueItemIds.filter((id) => current.has(id));
     if (!ids.length) continue;
-    const attempts = unit.attempts + 1;
+    const progressed = Boolean(unit.progress?.length);
+    const attempts = progressed ? 0 : unit.attempts + 1;
     if (attempts >= MAX_ATTEMPTS) {
       remove.push(...ids.filter((id) => unchanged(unit, id)));
       await ctx.swell
@@ -131,8 +140,11 @@ export async function settleQueue(ctx: AppContext, done: WorkUnit[], kept: WorkU
       .put(`${COLLECTION}/${keep}`, {
         kind: mergeKind(item.kind, unit.kind),
         input_ids: [...new Set([...(item.input_ids ?? []), ...unit.inputIds])],
+        done_input_ids: unchanged(unit, keep)
+          ? [...new Set([...(item.done_input_ids ?? []), ...(unit.doneInputIds ?? []), ...(unit.progress ?? [])])]
+          : (item.done_input_ids ?? []),
         attempts,
-        last_error: unit.error ?? null,
+        last_error: unit.error ?? item.last_error ?? null,
       })
       .catch(() => undefined);
   }

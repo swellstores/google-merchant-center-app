@@ -21,6 +21,8 @@ export interface DeliveryEnv {
 export interface DeliveryReport {
   done: WorkUnit[];
   kept: WorkUnit[];
+  /** Units the run never reached: none of their calls got an answer */
+  untouched: WorkUnit[];
   sentOps: number;
   /** Stops the run: auth, daily quota, or a whole batch that failed */
   failure?: GoogleApiError;
@@ -43,6 +45,10 @@ interface Plan {
   product: SwellProduct | null;
   skipped: SkipReason | null;
   ops: Op[];
+  /** Inputs Google holds: sent before, or earlier in this revision */
+  known: Set<string>;
+  /** Current offers already sent earlier in this revision */
+  carried: string[];
 }
 
 async function readProducts(env: DeliveryEnv, ids: string[]): Promise<Map<string, SwellProduct>> {
@@ -61,16 +67,19 @@ function planUnit(env: DeliveryEnv, unit: WorkUnit, product: SwellProduct | null
   };
 
   if (unit.kind === 'delete' || !product) {
-    unit.inputIds.forEach(addDelete);
-    return { unit, product: null, skipped: null, ops };
+    new Set([...unit.inputIds, ...(unit.doneInputIds ?? [])]).forEach(addDelete);
+    return { unit, product: null, skipped: null, ops, known: new Set(), carried: [] };
   }
 
   const fields: GoogleFields = product.$app?.[env.ctx.appId] ?? {};
   const previous = fields.input_ids ?? [];
+  const done = new Set(unit.doneInputIds ?? []);
+  const known = new Set([...previous, ...done]);
   const build = buildOffers(product, env.markets, { appId: env.ctx.appId, defaults: env.defaults, version: String(env.ctx.now()) });
   for (const offer of build.offers) {
+    if (done.has(offer.inputId)) continue;
     const dataSource = offer.market.data_source!;
-    const light = unit.kind === 'light' && previous.includes(offer.inputId);
+    const light = unit.kind === 'light' && known.has(offer.inputId);
     ops.push({
       kind: light ? 'patch' : 'insert',
       inputId: offer.inputId,
@@ -83,25 +92,30 @@ function planUnit(env: DeliveryEnv, unit: WorkUnit, product: SwellProduct | null
     });
   }
   const current = new Set(build.offers.map((offer) => offer.inputId));
-  previous.filter((id) => !current.has(id)).forEach(addDelete);
-  return { unit, product, skipped: build.skipped, ops };
+  [...known].filter((id) => !current.has(id)).forEach(addDelete);
+  const carried = build.offers.map((offer) => offer.inputId).filter((id) => done.has(id));
+  return { unit, product, skipped: build.skipped, ops, known, carried };
 }
 
 interface Settled {
   keep: boolean;
   upgrade?: boolean;
   error?: string;
+  untouched?: boolean;
+  progress?: string[];
   fatal?: GoogleApiError;
   fields?: GoogleFields;
 }
 
-function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResult>): Settled {
+function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResult>, attempted: Set<string>): Settled {
   const sent: string[] = [];
   const stillThere: string[] = [];
   const errors: string[] = [];
   let keep = false;
   let upgrade = false;
   let fatal: GoogleApiError | undefined;
+
+  if (plan.ops.length > 0 && !plan.ops.some((op) => attempted.has(op.part.id))) return { keep: true, untouched: true };
 
   for (const op of plan.ops) {
     const result = results.get(op.part.id);
@@ -132,10 +146,10 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
       continue;
     }
     errors.push(message);
-    if (op.kind === 'delete') stillThere.push(op.inputId);
+    if (op.kind === 'delete' || plan.known.has(op.inputId)) stillThere.push(op.inputId);
   }
 
-  if (keep) return { keep, upgrade, error: errors[0] ?? null, fatal };
+  if (keep) return { keep, upgrade, error: errors[0] ?? null, fatal, progress: sent };
   if (!plan.product) return { keep: false };
   const date_synced = iso(env.ctx.now());
   if (plan.skipped) {
@@ -147,7 +161,7 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
       sync_state: errors.length ? 'error' : 'sent',
       sync_reason: null,
       sync_error: errors[0] ?? null,
-      input_ids: [...sent, ...stillThere],
+      input_ids: [...new Set([...plan.carried, ...sent, ...stillThere])],
       date_synced,
     },
   };
@@ -164,11 +178,14 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[]): Promise<Deli
   const ops = plans.flatMap((plan) => plan.ops);
 
   const results = new Map<string, BatchResult>();
+  const attempted = new Set<string>();
   let failure: GoogleApiError | undefined;
   for (let i = 0; i < ops.length && !failure; i += MAX_BATCH_PARTS) {
     if (!env.budget.has(SEND_RESERVE_MS)) break;
+    const parts = ops.slice(i, i + MAX_BATCH_PARTS).map((op) => op.part);
+    parts.forEach((part) => attempted.add(part.id));
     try {
-      const answers = await sendBatch(env.ctx.fetch, env.token, ops.slice(i, i + MAX_BATCH_PARTS).map((op) => op.part));
+      const answers = await sendBatch(env.ctx.fetch, env.token, parts);
       for (const answer of answers) results.set(answer.id, answer);
     } catch (error) {
       if (!(error instanceof GoogleApiError)) throw error;
@@ -176,13 +193,17 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[]): Promise<Deli
     }
   }
 
-  const report: DeliveryReport = { done: [], kept: [], sentOps: results.size, failure };
+  const report: DeliveryReport = { done: [], kept: [], untouched: [], sentOps: results.size, failure };
   const writes: [string, GoogleFields][] = [];
   for (const plan of plans) {
-    const settled = settlePlan(env, plan, results);
+    const settled = settlePlan(env, plan, results, attempted);
     if (settled.fatal && !report.failure) report.failure = settled.fatal;
+    if (settled.untouched) {
+      report.untouched.push(plan.unit);
+      continue;
+    }
     if (settled.keep) {
-      report.kept.push({ ...plan.unit, kind: settled.upgrade ? 'full' : plan.unit.kind, error: settled.error ?? null });
+      report.kept.push({ ...plan.unit, kind: settled.upgrade ? 'full' : plan.unit.kind, error: settled.error ?? null, progress: settled.progress });
       continue;
     }
     report.done.push(plan.unit);
@@ -191,7 +212,9 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[]): Promise<Deli
 
   for (let i = 0; i < writes.length; i += WRITE_CONCURRENCY) {
     await Promise.all(
-      writes.slice(i, i + WRITE_CONCURRENCY).map(([id, fields]) => env.ctx.swell.put(`/products/${id}`, { $app: { [env.ctx.appId]: fields } })),
+      writes.slice(i, i + WRITE_CONCURRENCY).map(([id, fields]) =>
+        env.ctx.swell.put(`/products/${id}`, { $app: { [env.ctx.appId]: fields } }).catch(() => undefined),
+      ),
     );
   }
   return report;
