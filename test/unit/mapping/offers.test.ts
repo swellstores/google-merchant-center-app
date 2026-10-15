@@ -117,7 +117,43 @@ describe('buildOffers', () => {
       ageGroup: 'ADULT',
       gender: 'UNISEX',
     });
-    expect(blue.input.productAttributes).toMatchObject({ mpn: 'TS-1', gtins: ['0012345678905'] });
+    expect(blue.input.productAttributes).toMatchObject({ mpn: 'TS-1' });
+    expect(blue.input.productAttributes.gtins).toBeUndefined();
+  });
+
+  it('uses the product-level GTIN for a product without variants', () => {
+    const product: SwellProduct = {
+      ...MUG,
+      $app: { [APP]: { identifiers: { product: { gtin: '0012345678905', mpn: 'MUG-1' } } } },
+    };
+    const [offer] = buildOffers(product, [MARKET], OPTS).offers;
+    expect(offer.input.productAttributes).toMatchObject({ gtins: ['0012345678905'], mpn: 'MUG-1' });
+  });
+
+  it('falls back field by field for a variant', () => {
+    const product: SwellProduct = {
+      ...SHIRT,
+      $app: {
+        [APP]: {
+          mpn: 'TS-1',
+          identifiers: { v1: { mpn: 'TS-RED-M' }, product: { gtin: '0012345678905', mpn: 'TS-SHARED' } },
+        },
+      },
+    };
+    const [red, blue] = buildOffers(product, [MARKET], OPTS).offers;
+    expect(red.input.productAttributes).toMatchObject({ mpn: 'TS-RED-M' });
+    expect(red.input.productAttributes.gtins).toBeUndefined();
+    expect(blue.input.productAttributes).toMatchObject({ mpn: 'TS-SHARED' });
+    expect(blue.input.productAttributes.gtins).toBeUndefined();
+  });
+
+  it('falls back to product images when the variant’s images have no URL', () => {
+    const product: SwellProduct = {
+      ...SHIRT,
+      variants: { results: [{ id: 'v1', name: 'Red / M', active: true, images: [{ file: {} }] }] },
+    };
+    const [offer] = buildOffers(product, [MARKET], OPTS).offers;
+    expect(offer.input.productAttributes.imageLink).toBe('https://cdn.example.com/shirt.jpg');
   });
 
   it('declares missing identifiers only when the merchant says so', () => {

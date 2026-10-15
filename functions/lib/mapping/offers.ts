@@ -2,7 +2,7 @@ import type { Market } from '../connection/markets';
 import { productInputId, type InputKey, type ProductAttributes, type ProductInput } from '../google/merchant';
 import { money, unitPrices } from './price';
 import { stripHtml, truncate } from './text';
-import type { GoogleFields, SwellProduct, SwellVariant } from './types';
+import type { GoogleFields, SwellImage, SwellProduct, SwellVariant } from './types';
 
 export interface OfferDefaults {
   brand?: string;
@@ -48,9 +48,13 @@ function sellableUnits(product: SwellProduct): (SwellVariant | undefined)[] {
   return all.filter((v) => v.active !== false && !v.archived);
 }
 
+function urlsOf(images: SwellImage[] | undefined): string[] {
+  return (images ?? []).map((image) => image.file?.url).filter((url): url is string => Boolean(url));
+}
+
 function imageUrls(product: SwellProduct, variant?: SwellVariant): string[] {
-  const images = variant?.images?.length ? variant.images : (product.images ?? []);
-  return images.map((image) => image.file?.url).filter((url): url is string => Boolean(url));
+  const own = urlsOf(variant?.images);
+  return own.length ? own : urlsOf(product.images);
 }
 
 function buildLink(template: string, values: Record<string, string>): string {
@@ -70,8 +74,10 @@ function buildInput(
   if (!images.length) return 'no_image';
 
   const name = product.name?.trim() || product.id;
-  const ids = (variant && fields.identifiers?.[variant.id]) || fields.identifiers?.product;
-  const gtin = ids?.gtin?.trim();
+  const own = variant ? fields.identifiers?.[variant.id] : undefined;
+  const shared = fields.identifiers?.product;
+  const gtin = (variant ? own?.gtin : shared?.gtin)?.trim();
+  const mpn = own?.mpn?.trim() || shared?.mpn?.trim() || fields.mpn?.trim() || undefined;
   const tracked = Boolean(product.stock_tracking);
   const level = (variant ? variant.stock_level : product.stock_level) ?? 0;
 
@@ -92,7 +98,7 @@ function buildInput(
     salePrice: sale !== null ? money(sale, market.currency) : undefined,
     condition: (fields.condition ?? opts.defaults.condition).toUpperCase() as ProductAttributes['condition'],
     brand: fields.brand?.trim() || opts.defaults.brand || undefined,
-    mpn: ids?.mpn?.trim() || fields.mpn?.trim() || undefined,
+    mpn,
     gtins: gtin ? [gtin] : undefined,
     identifierExists: fields.identifier_exists === false ? false : undefined,
     googleProductCategory: fields.google_category?.trim() || undefined,
