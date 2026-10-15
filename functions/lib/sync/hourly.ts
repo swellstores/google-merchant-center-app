@@ -1,4 +1,4 @@
-import { loadConnection } from '../connection/store';
+import { loadConnection, type Connection } from '../connection/store';
 import { accessTokenFor, markBroken } from '../connection/token';
 import type { AppContext } from '../context';
 import { GoogleApiError, googleCall } from '../google/http';
@@ -6,7 +6,7 @@ import { listQuotas } from '../google/merchant';
 import { iso } from '../time';
 import { loadAlarm, setAlarm } from './alarm';
 import { queueCount } from './queue';
-import { loadState, saveState } from './state';
+import { loadState, saveState, type QuotaInfo, type SyncState } from './state';
 
 /** An alarm this far in the past means its run never happened. */
 export const STALL_MS = 5 * 60_000;
@@ -25,6 +25,28 @@ export function quotaFromGroups(body: { quotaGroups?: QuotaGroup[] }): { minute_
   return { minute_limit: toNumber(group?.quotaMinuteLimit), daily_limit: toNumber(group?.quotaLimit) };
 }
 
+/**
+ * Reads Google's limits for product inserts into the state, also the one in
+ * hand. Resolves with Google's refusal of the key or account, after marking
+ * the connection broken; other Google errors keep the old limits.
+ */
+export async function refreshQuota(ctx: AppContext, connection: Connection, state: SyncState): Promise<GoogleApiError | null> {
+  try {
+    const token = await accessTokenFor(ctx, connection);
+    const limits = quotaFromGroups(await googleCall(ctx.fetch, token, listQuotas(connection.merchant_id!)));
+    const quota: QuotaInfo = { ...state.quota, ...limits, date_checked: iso(ctx.now()) };
+    await saveState(ctx.swell, state.id, { quota: { $set: quota } });
+    state.quota = quota;
+  } catch (error) {
+    if (!(error instanceof GoogleApiError)) throw error;
+    if (error.kind === 'auth') {
+      await markBroken(ctx, connection, error.message);
+      return error;
+    }
+  }
+  return null;
+}
+
 /** Safety net: refreshes the quota daily and wakes a courier whose alarm was lost. */
 export async function runHourly(ctx: AppContext): Promise<void> {
   const connection = await loadConnection(ctx.swell);
@@ -33,19 +55,7 @@ export async function runHourly(ctx: AppContext): Promise<void> {
   const now = ctx.now();
 
   const checked = state.quota?.date_checked ? Date.parse(state.quota.date_checked) : 0;
-  if (now - checked >= QUOTA_TTL_MS) {
-    try {
-      const token = await accessTokenFor(ctx, connection);
-      const limits = quotaFromGroups(await googleCall(ctx.fetch, token, listQuotas(connection.merchant_id)));
-      await saveState(ctx.swell, state.id, { quota: { $set: { ...state.quota, ...limits, date_checked: iso(now) } } });
-    } catch (error) {
-      if (!(error instanceof GoogleApiError)) throw error;
-      if (error.kind === 'auth') {
-        await markBroken(ctx, connection, error.message);
-        return;
-      }
-    }
-  }
+  if (now - checked >= QUOTA_TTL_MS && (await refreshQuota(ctx, connection, state))) return;
 
   const pending = state.full_sync?.status === 'running' || (await queueCount(ctx.swell)) > 0;
   if (!pending) return;

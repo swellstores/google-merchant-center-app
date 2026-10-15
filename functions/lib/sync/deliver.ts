@@ -24,7 +24,10 @@ export interface DeliveryReport {
   /** Units none of whose calls went out in a batch */
   untouched: WorkUnit[];
   sentOps: number;
-  /** Stops the run: auth, daily quota, or a whole batch that failed */
+  /**
+   * Stops the run: auth, daily quota, a whole batch that failed, or a part
+   * answered with a rate limit or a server error
+   */
   failure?: GoogleApiError;
 }
 
@@ -107,6 +110,9 @@ interface Settled {
   untouched?: boolean;
   progress?: string[];
   fatal?: GoogleApiError;
+  /** The first part answered with a rate limit or a server error */
+  short?: GoogleApiError;
+  charge?: boolean;
   fields?: GoogleFields;
 }
 
@@ -117,7 +123,9 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
   const errors: string[] = [];
   let keep = false;
   let upgrade = false;
+  let charge = false;
   let fatal: GoogleApiError | undefined;
+  let short: GoogleApiError | undefined;
 
   if (plan.ops.length > 0 && !plan.ops.some((op) => attempted.has(op.part.id))) return { keep: true, untouched: true };
 
@@ -149,7 +157,9 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
       continue;
     }
     if (kind === 'rate' || kind === 'server') {
+      short ??= new GoogleApiError(kind, result.status, message, result.body);
       keep = true;
+      charge ||= kind === 'server';
       errors.push(message);
       continue;
     }
@@ -157,7 +167,7 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
     if (op.kind === 'delete' || plan.known.has(op.inputId)) stillThere.push(op.inputId);
   }
 
-  if (keep) return { keep, upgrade, error: errors[0] ?? null, fatal, progress: completed };
+  if (keep) return { keep, upgrade, error: errors[0] ?? null, fatal, short, charge, progress: completed };
   if (!plan.product) return { keep: false };
   const date_synced = iso(env.ctx.now());
   if (plan.skipped) {
@@ -204,20 +214,30 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[]): Promise<Deli
 
   const report: DeliveryReport = { done: [], kept: [], untouched: [], sentOps: results.size, failure };
   const writes: [string, GoogleFields][] = [];
+  let short: GoogleApiError | undefined;
   for (const plan of plans) {
     const settled = settlePlan(env, plan, results, attempted);
     if (settled.fatal && !report.failure) report.failure = settled.fatal;
+    short ??= settled.short;
     if (settled.untouched) {
       report.untouched.push(plan.unit);
       continue;
     }
     if (settled.keep) {
-      report.kept.push({ ...plan.unit, kind: settled.upgrade ? 'full' : plan.unit.kind, error: settled.error ?? null, progress: settled.progress });
+      report.kept.push({
+        ...plan.unit,
+        kind: settled.upgrade ? 'full' : plan.unit.kind,
+        error: settled.error ?? null,
+        progress: settled.progress,
+        charge: settled.charge,
+      });
       continue;
     }
     report.done.push(plan.unit);
     if (plan.product && settled.fields) writes.push([plan.product.id, settled.fields]);
   }
+  // A part was rate limited or failed on Google's side: the courier settles what it has and backs off.
+  report.failure ??= short;
 
   for (let i = 0; i < writes.length; i += WRITE_CONCURRENCY) {
     await Promise.all(

@@ -4,8 +4,9 @@ import { loadAlarm, setAlarm } from '../../../functions/lib/sync/alarm';
 import { quotaFromGroups, runHourly } from '../../../functions/lib/sync/hourly';
 import { enqueue } from '../../../functions/lib/sync/queue';
 import { loadState, saveState } from '../../../functions/lib/sync/state';
+import { loadConnection } from '../../../functions/lib/connection/store';
 import { fixedClock, NOW, testContext } from '../../helpers/context';
-import { createFakeGoogle, DEFAULT_QUOTA } from '../../helpers/fake-google';
+import { createFakeGoogle, DEFAULT_QUOTA, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { createFakeSwell } from '../../helpers/fake-swell';
 import { makeServiceAccountKey } from '../../helpers/keys';
 
@@ -16,10 +17,13 @@ beforeAll(async () => {
 
 const at = (ms: number) => new Date(ms).toISOString();
 
-function setup(status = 'connected') {
-  const google = createFakeGoogle();
+function setup(status = 'connected', googleOptions: FakeGoogleOptions = {}, connection: Record<string, any> = {}) {
+  const google = createFakeGoogle(googleOptions);
   const fake = createFakeSwell({
-    connection: { status, merchant_id: '123', client_email: key.client_email, private_key: key.private_key, access_token: 'cached', access_token_expires: at(NOW + 3600_000) },
+    connection: {
+      status, merchant_id: '123', client_email: key.client_email, private_key: key.private_key, access_token: 'cached', access_token_expires: at(NOW + 3600_000),
+      ...connection,
+    },
   });
   return { google, ...fake, ctx: testContext(fake.swell, google.fetch) };
 }
@@ -46,6 +50,15 @@ describe('runHourly', () => {
     expect((await loadState(swell)).quota).toMatchObject({ minute_limit: 300, daily_limit: 5000, date_checked: at(NOW) });
     await runHourly(ctx);
     expect(google.requests.filter((r) => r.path.startsWith('/quota'))).toHaveLength(1);
+  });
+
+  it('marks the connection broken when Google refuses the key', async () => {
+    const refused = { status: 400, body: { error: 'invalid_grant', error_description: 'Invalid JWT Signature.' } };
+    const { ctx, swell } = setup('connected', { token: refused }, { access_token: null, access_token_expires: null });
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    await runHourly(ctx);
+    expect(await loadConnection(swell)).toMatchObject({ status: 'broken', last_error: 'Invalid JWT Signature.' });
+    expect((await loadAlarm(swell)).wake_at ?? null).toBeNull();
   });
 
   it('wakes a stalled queue', async () => {

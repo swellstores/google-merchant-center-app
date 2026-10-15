@@ -8,6 +8,7 @@ import { Budget, iso, nextNoonUtc } from '../time';
 import { setAlarm } from './alarm';
 import { deliver, SEND_RESERVE_MS, type DeliveryEnv } from './deliver';
 import { fullSyncPass } from './full-sync';
+import { refreshQuota } from './hourly';
 import { queueCount, settleQueue, takeQueue, unitsFromQueue } from './queue';
 import { loadState, saveState, type FullSyncJob, type SyncState } from './state';
 
@@ -41,6 +42,11 @@ async function work(ctx: AppContext, connection: Connection, state: SyncState, b
   let queueMore = false;
 
   const token = await accessTokenFor(ctx, connection);
+  // Pacing needs the per-minute limit from the first run on.
+  if (!state.quota?.date_checked) {
+    const refused = await refreshQuota(ctx, connection, state);
+    if (refused) throw refused;
+  }
   const markets = await ensureDataSources(ctx, token, connection.merchant_id!, await loadMarkets(ctx.swell));
   const env: DeliveryEnv = { ctx, accountId: connection.merchant_id!, token, markets, defaults: DEFAULTS, budget };
 

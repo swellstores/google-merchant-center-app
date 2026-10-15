@@ -6,7 +6,7 @@ import { NEXT_RUN_MS, pacedDelay, runCourier } from '../../../functions/lib/sync
 import { enqueue, queueCount } from '../../../functions/lib/sync/queue';
 import { loadState, saveState } from '../../../functions/lib/sync/state';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
-import { NOW, testContext } from '../../helpers/context';
+import { APP_ID, NOW, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { createFakeSwell } from '../../helpers/fake-swell';
 import { makeServiceAccountKey } from '../../helpers/keys';
@@ -98,12 +98,14 @@ describe('runCourier', () => {
   });
 
   it('does not retry kept units in the same run', async () => {
-    const products = Array.from({ length: 50 }, (_, i) => ({ ...MUG, id: `p${String(i).padStart(2, '0')}`, slug: `p${i}` }));
-    const rate = { status: 429, body: { error: { message: 'quota/request_rate_too_high' } } };
-    const { ctx, swell, collections } = setupMany(products, { offerErrors: { p00: rate } });
-    for (const p of products) await enqueue(swell, { productId: p.id, kind: 'full' });
+    const products: Record<string, any>[] = Array.from({ length: 50 }, (_, i) => ({ ...MUG, id: `p${String(i).padStart(2, '0')}`, slug: `p${i}` }));
+    // Google lost the offer of a light update: the unit is kept as full, and the run has no failure.
+    products[0] = { ...products[0], $app: { [APP_ID]: { input_ids: ['en~US~p00'] } } };
+    const { ctx, swell, collections } = setupMany(products);
+    await enqueue(swell, { productId: 'p00', kind: 'light' });
+    for (const p of products.slice(1)) await enqueue(swell, { productId: p.id, kind: 'full' });
     await runCourier(ctx);
-    expect(collections['/queue-items'].find((q) => q.product_id === 'p00')?.attempts).toBe(1);
+    expect(collections['/queue-items'].map((q) => [q.product_id, q.kind])).toEqual([['p00', 'full']]);
   });
 
   it('proceeds when running_since is stale', async () => {
@@ -133,6 +135,23 @@ describe('runCourier', () => {
     expect((await loadState(swell)).backoff).toBe(1);
     expect((await loadAlarm(swell)).wake_at).toBe(at(NOW + 30_000));
     expect((await loadState(swell)).not_before).toBe(at(NOW + 30_000));
+  });
+
+  it('backs off after a part-level 429 without charging an attempt', async () => {
+    const rate = { status: 429, body: { error: { message: 'quota/request_rate_too_high' } } };
+    const { ctx, swell, collections } = setup({ offerErrors: { p1: rate } });
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    expect((await runCourier(ctx)).next).toBe('later');
+    expect(collections['/queue-items']).toEqual([expect.objectContaining({ product_id: 'p1', attempts: 0 })]);
+    expect((await loadState(swell)).not_before).toBe(at(NOW + 30_000));
+    expect((await loadAlarm(swell)).wake_at).toBe(at(NOW + 30_000));
+  });
+
+  it('reads the quota on its first run', async () => {
+    const { ctx, swell } = setup();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    await runCourier(ctx);
+    expect((await loadState(swell)).quota).toMatchObject({ minute_limit: 300, daily_limit: 5000, date_checked: at(NOW) });
   });
 
   it('pauses until noon UTC when the daily quota is gone', async () => {

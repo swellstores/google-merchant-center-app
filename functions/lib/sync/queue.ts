@@ -29,6 +29,8 @@ export interface WorkUnit {
   doneInputIds?: string[];
   /** Inputs sent OK in this run, on kept units. */
   progress?: string[];
+  /** A part got a server error: the run counts as an attempt. Rate limits never do. */
+  charge?: boolean;
 }
 
 export const MAX_ATTEMPTS = 8;
@@ -112,8 +114,8 @@ async function currentItems(swell: SwellClient, ids: string[]): Promise<Map<stri
 /**
  * Removes the items of finished units, except items edited since they were
  * taken: those carry a newer change and stay for the next run. A kept unit
- * stays as one item with one more attempt, merged with any edit made
- * meanwhile; after the last attempt it is dropped and the product says why.
+ * stays as one item, merged with any edit made meanwhile; a charged one counts
+ * an attempt, and after the last attempt it is dropped and the product says why.
  */
 export async function settleQueue(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]): Promise<void> {
   const current = await currentItems(ctx.swell, [...done, ...kept].flatMap((unit) => unit.queueItemIds));
@@ -126,7 +128,7 @@ export async function settleQueue(ctx: AppContext, done: WorkUnit[], kept: WorkU
     const ids = unit.queueItemIds.filter((id) => current.has(id));
     if (!ids.length) continue;
     const progressed = Boolean(unit.progress?.length);
-    const attempts = progressed ? 0 : unit.attempts + 1;
+    const attempts = progressed ? 0 : unit.charge ? unit.attempts + 1 : unit.attempts;
     if (attempts >= MAX_ATTEMPTS) {
       remove.push(...ids.filter((id) => unchanged(unit, id)));
       await ctx.swell

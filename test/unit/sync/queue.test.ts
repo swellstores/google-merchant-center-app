@@ -109,16 +109,34 @@ describe('settleQueue', () => {
     await enqueue(swell, { productId: 'p1', kind: 'full' });
     await enqueue(swell, { productId: 'p2', kind: 'light' });
     const [done, kept] = unitsFromQueue(await takeQueue(swell, 10));
-    await settleQueue(testContext(swell), [done], [{ ...kept, kind: 'full', error: 'rate limited' }]);
+    await settleQueue(testContext(swell), [done], [{ ...kept, kind: 'full', error: 'backend error', charge: true }]);
     expect(collections['/queue-items']).toHaveLength(1);
-    expect(collections['/queue-items'][0]).toMatchObject({ product_id: 'p2', kind: 'full', attempts: 1, last_error: 'rate limited' });
+    expect(collections['/queue-items'][0]).toMatchObject({ product_id: 'p2', kind: 'full', attempts: 1, last_error: 'backend error' });
+  });
+
+  it('counts no attempt for a kept unit that was not charged', async () => {
+    const { swell, collections } = createFakeSwell();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    collections['/queue-items'][0].attempts = 3;
+    const [unit] = unitsFromQueue(await takeQueue(swell, 10));
+    await settleQueue(testContext(swell), [], [{ ...unit, error: 'rate limited' }]);
+    expect(collections['/queue-items'][0]).toMatchObject({ attempts: 3, last_error: 'rate limited' });
+  });
+
+  it('counts an attempt for a charged unit', async () => {
+    const { swell, collections } = createFakeSwell();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    collections['/queue-items'][0].attempts = 3;
+    const [unit] = unitsFromQueue(await takeQueue(swell, 10));
+    await settleQueue(testContext(swell), [], [{ ...unit, error: 'backend error', charge: true }]);
+    expect(collections['/queue-items'][0]).toMatchObject({ attempts: 4, last_error: 'backend error' });
   });
 
   it('gives up after the last attempt and says so on the product', async () => {
     const { swell, collections } = createFakeSwell({ products: [{ id: 'p1', name: 'Stuck' }] });
     await enqueue(swell, { productId: 'p1', kind: 'full' });
     const [unit] = unitsFromQueue(await takeQueue(swell, 10));
-    await settleQueue(testContext(swell), [], [{ ...unit, attempts: MAX_ATTEMPTS - 1, error: 'Google kept failing' }]);
+    await settleQueue(testContext(swell), [], [{ ...unit, attempts: MAX_ATTEMPTS - 1, error: 'Google kept failing', charge: true }]);
     expect(collections['/queue-items']).toHaveLength(0);
     expect(collections['/products'][0].$app[APP_ID]).toMatchObject({ sync_state: 'error', sync_error: 'Google kept failing' });
   });
@@ -138,7 +156,7 @@ describe('settleQueue', () => {
     await enqueue(swell, { productId: 'p1', kind: 'light' });
     const units = unitsFromQueue(await takeQueue(swell, 10));
     await enqueue(swell, { productId: 'p1', kind: 'delete', inputIds: ['en~US~p1'] });
-    await settleQueue(testContext(swell), [], [{ ...units[0], error: 'rate limited' }]);
+    await settleQueue(testContext(swell), [], [{ ...units[0], error: 'backend error', charge: true }]);
     expect(collections['/queue-items']).toHaveLength(1);
     expect(collections['/queue-items'][0]).toMatchObject({ kind: 'delete', input_ids: ['en~US~p1'], attempts: 1 });
   });

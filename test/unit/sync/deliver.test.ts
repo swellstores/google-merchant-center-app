@@ -100,7 +100,25 @@ describe('deliver', () => {
     const report = await deliver(env, [unit('p1'), unit('p2')]);
     expect(report.done.map((u) => u.productId)).toEqual(['p1']);
     expect(report.kept.map((u) => u.productId)).toEqual(['p2']);
-    expect(report.failure).toBeUndefined();
+  });
+
+  it('reports a part answered 429 as a non-fatal run failure', async () => {
+    const rate = { status: 429, body: { error: { message: 'quota/request_rate_too_high' } } };
+    const { env, appFields } = setup([mug()], { offerErrors: { p1: rate } });
+    const report = await deliver(env, [unit('p1')]);
+    expect(report.failure).toMatchObject({ kind: 'rate', status: 429, message: 'quota/request_rate_too_high' });
+    expect(report.kept.map((u) => u.productId)).toEqual(['p1']);
+    expect(report.kept[0].charge).toBeFalsy();
+    expect(appFields('p1')).toBeUndefined();
+  });
+
+  it('charges a unit whose part got a 5xx', async () => {
+    const outage = { status: 503, body: { error: { message: 'The service is currently unavailable.' } } };
+    const { env } = setup([mug(), mug({ id: 'p2', slug: 'p2' })], { offerErrors: { p2: outage } });
+    const report = await deliver(env, [unit('p1'), unit('p2')]);
+    expect(report.done.map((u) => u.productId)).toEqual(['p1']);
+    expect(report.kept).toEqual([expect.objectContaining({ productId: 'p2', charge: true })]);
+    expect(report.failure).toMatchObject({ kind: 'server', status: 503 });
   });
 
   it('keeps every unit when the whole batch is rate limited', async () => {
