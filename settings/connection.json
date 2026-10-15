@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json.swell.store/setting.json",
+  "label": "Google Merchant Center",
+  "description": "Connect your Merchant Center account. Your products are listed in Google Shopping and free listings and kept up to date.",
+  "fields": [
+    { "id": "connection", "type": "component", "component": "GoogleConnect", "label": "Connection" }
+  ]
+}
