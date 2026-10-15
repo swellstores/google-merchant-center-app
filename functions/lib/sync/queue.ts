@@ -10,6 +10,7 @@ export interface QueueItem {
   input_ids?: string[];
   attempts?: number;
   last_error?: string | null;
+  revision?: number;
   date_created?: string;
 }
 
@@ -21,6 +22,8 @@ export interface WorkUnit {
   queueItemIds: string[];
   attempts: number;
   error?: string | null;
+  /** Queue item id → the revision taken, to tell later edits apart. */
+  revisions?: Record<string, number>;
 }
 
 export const MAX_ATTEMPTS = 8;
@@ -39,13 +42,14 @@ export async function enqueue(swell: SwellClient, plan: { productId: string; kin
   const existing = await swell.get(COLLECTION, { where: { product_id: plan.productId }, limit: 1 });
   const current: QueueItem | undefined = existing?.results?.[0];
   if (!current) {
-    await swell.post(COLLECTION, { product_id: plan.productId, kind: plan.kind, input_ids: plan.inputIds ?? [], attempts: 0 });
+    await swell.post(COLLECTION, { product_id: plan.productId, kind: plan.kind, input_ids: plan.inputIds ?? [], attempts: 0, revision: 0 });
     return;
   }
-  const kind = mergeKind(current.kind, plan.kind);
-  if (kind !== current.kind || plan.inputIds?.length) {
-    await swell.put(`${COLLECTION}/${current.id}`, { kind, ...(plan.inputIds?.length ? { input_ids: plan.inputIds } : {}) });
-  }
+  await swell.put(`${COLLECTION}/${current.id}`, {
+    kind: mergeKind(current.kind, plan.kind),
+    revision: (current.revision ?? 0) + 1,
+    ...(plan.inputIds?.length ? { input_ids: [...new Set([...(current.input_ids ?? []), ...plan.inputIds])] } : {}),
+  });
 }
 
 export async function takeQueue(swell: SwellClient, limit: number): Promise<QueueItem[]> {
@@ -69,6 +73,7 @@ export function unitsFromQueue(items: QueueItem[]): WorkUnit[] {
         inputIds: [...(item.input_ids ?? [])],
         queueItemIds: [item.id],
         attempts: item.attempts ?? 0,
+        revisions: { [item.id]: item.revision ?? 0 },
       });
       continue;
     }
@@ -76,6 +81,7 @@ export function unitsFromQueue(items: QueueItem[]): WorkUnit[] {
     unit.inputIds = [...new Set([...unit.inputIds, ...(item.input_ids ?? [])])];
     unit.queueItemIds.push(item.id);
     unit.attempts = Math.max(unit.attempts, item.attempts ?? 0);
+    unit.revisions![item.id] = item.revision ?? 0;
   }
   return [...byProduct.values()];
 }
@@ -86,17 +92,31 @@ async function inChunks<T>(values: T[], run: (value: T) => Promise<unknown>): Pr
   }
 }
 
+async function currentItems(swell: SwellClient, ids: string[]): Promise<Map<string, QueueItem>> {
+  if (!ids.length) return new Map();
+  const list = await swell.get(COLLECTION, { where: { id: { $in: ids } }, limit: ids.length });
+  return new Map((list?.results ?? []).map((item: QueueItem): [string, QueueItem] => [item.id, item]));
+}
+
 /**
- * Removes the items of finished units. A kept unit stays as one item with one
- * more attempt; after the last attempt it is dropped and the product says why.
+ * Removes the items of finished units, except items edited since they were
+ * taken: those carry a newer change and stay for the next run. A kept unit
+ * stays as one item with one more attempt, merged with any edit made
+ * meanwhile; after the last attempt it is dropped and the product says why.
  */
 export async function settleQueue(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]): Promise<void> {
-  const remove: string[] = done.flatMap((unit) => unit.queueItemIds);
+  const current = await currentItems(ctx.swell, [...done, ...kept].flatMap((unit) => unit.queueItemIds));
+  const unchanged = (unit: WorkUnit, id: string) => {
+    const item = current.get(id);
+    return Boolean(item) && (item!.revision ?? 0) === (unit.revisions?.[id] ?? 0);
+  };
+  const remove: string[] = done.flatMap((unit) => unit.queueItemIds.filter((id) => unchanged(unit, id)));
   for (const unit of kept) {
-    if (!unit.queueItemIds.length) continue;
+    const ids = unit.queueItemIds.filter((id) => current.has(id));
+    if (!ids.length) continue;
     const attempts = unit.attempts + 1;
     if (attempts >= MAX_ATTEMPTS) {
-      remove.push(...unit.queueItemIds);
+      remove.push(...ids.filter((id) => unchanged(unit, id)));
       await ctx.swell
         .put(`/products/${unit.productId}`, {
           $app: { [ctx.appId]: { sync_state: 'error', sync_error: unit.error ?? 'Google did not accept the product', date_synced: iso(ctx.now()) } },
@@ -104,17 +124,29 @@ export async function settleQueue(ctx: AppContext, done: WorkUnit[], kept: WorkU
         .catch(() => undefined);
       continue;
     }
-    const [keep, ...duplicates] = unit.queueItemIds;
-    remove.push(...duplicates);
-    await ctx.swell.put(`${COLLECTION}/${keep}`, { kind: unit.kind, attempts, last_error: unit.error ?? null });
+    const [keep, ...duplicates] = ids;
+    remove.push(...duplicates.filter((id) => unchanged(unit, id)));
+    const item = current.get(keep)!;
+    await ctx.swell
+      .put(`${COLLECTION}/${keep}`, {
+        kind: mergeKind(item.kind, unit.kind),
+        input_ids: [...new Set([...(item.input_ids ?? []), ...unit.inputIds])],
+        attempts,
+        last_error: unit.error ?? null,
+      })
+      .catch(() => undefined);
   }
   await inChunks(remove, (id) => ctx.swell.delete(`${COLLECTION}/${id}`).catch(() => undefined));
 }
 
 export async function clearQueue(swell: SwellClient): Promise<void> {
+  let previous = '';
   for (;;) {
     const items = await takeQueue(swell, 100);
-    if (!items.length) return;
+    const ids = items.map((item) => item.id).join(',');
+    // Deletes that keep failing would otherwise loop forever.
+    if (!items.length || ids === previous) return;
+    previous = ids;
     await inChunks(items, (item) => swell.delete(`${COLLECTION}/${item.id}`).catch(() => undefined));
   }
 }

@@ -8,6 +8,7 @@
     "kind": { "type": "string", "enum": ["full", "light", "delete"], "required": true },
     "input_ids": { "type": "array", "value_type": "string", "description": "Product inputs to delete when the product itself is gone" },
     "attempts": { "type": "int", "default": 0 },
-    "last_error": { "type": "string" }
+    "last_error": { "type": "string" },
+    "revision": { "type": "int", "default": 0, "description": "Bumped on every change, so the courier never removes an item edited while it was being sent" }
   }
 }

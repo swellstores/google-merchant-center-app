@@ -35,6 +35,7 @@ describe('enqueue', () => {
       ['p2', 'light'],
     ]);
     expect(await queueCount(swell)).toBe(2);
+    expect(collections['/queue-items'][0].revision).toBe(1);
   });
 
   it('keeps the input ids of a delete', async () => {
@@ -80,11 +81,60 @@ describe('settleQueue', () => {
     expect(collections['/products'][0].$app[APP_ID]).toMatchObject({ sync_state: 'error', sync_error: 'Google kept failing' });
   });
 
+  it('keeps an item edited while the courier sent it', async () => {
+    const { swell, collections } = createFakeSwell();
+    await enqueue(swell, { productId: 'p1', kind: 'light' });
+    const units = unitsFromQueue(await takeQueue(swell, 10));
+    await enqueue(swell, { productId: 'p1', kind: 'light' });
+    await settleQueue(testContext(swell), units, []);
+    expect(collections['/queue-items']).toHaveLength(1);
+    expect(collections['/queue-items'][0]).toMatchObject({ product_id: 'p1', revision: 1 });
+  });
+
+  it('merges a kept unit with an edit made meanwhile', async () => {
+    const { swell, collections } = createFakeSwell();
+    await enqueue(swell, { productId: 'p1', kind: 'light' });
+    const units = unitsFromQueue(await takeQueue(swell, 10));
+    await enqueue(swell, { productId: 'p1', kind: 'delete', inputIds: ['en~US~p1'] });
+    await settleQueue(testContext(swell), [], [{ ...units[0], error: 'rate limited' }]);
+    expect(collections['/queue-items']).toHaveLength(1);
+    expect(collections['/queue-items'][0]).toMatchObject({ kind: 'delete', input_ids: ['en~US~p1'], attempts: 1 });
+  });
+
+  it('keeps the input ids of a kept unit\'s duplicates', async () => {
+    const { swell, collections } = createFakeSwell();
+    collections['/queue-items'].push(
+      { id: 'a', product_id: 'p1', kind: 'delete', input_ids: [], attempts: 0, revision: 0, date_created: '2026-01-01T00:00:00.000Z' },
+      { id: 'b', product_id: 'p1', kind: 'delete', input_ids: ['en~US~p1'], attempts: 0, revision: 0, date_created: '2026-01-02T00:00:00.000Z' },
+    );
+    const [unit] = unitsFromQueue(await takeQueue(swell, 10));
+    await settleQueue(testContext(swell), [], [unit]);
+    expect(collections['/queue-items']).toHaveLength(1);
+    expect(collections['/queue-items'][0].input_ids).toEqual(['en~US~p1']);
+  });
+
   it('clears everything', async () => {
     const { swell } = createFakeSwell();
     await enqueue(swell, { productId: 'p1', kind: 'full' });
     await enqueue(swell, { productId: 'p2', kind: 'full' });
     await clearQueue(swell);
     expect(await queueCount(swell)).toBe(0);
+  });
+
+  it('stops clearing when deletes keep failing', async () => {
+    const { swell, collections } = createFakeSwell();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    swell.delete.mockImplementation(async () => {
+      throw new Error('denied');
+    });
+    // Guard: a looping clearQueue fails here instead of spinning forever.
+    const realGet = swell.get.getMockImplementation()!;
+    let reads = 0;
+    swell.get.mockImplementation(async (...args: any[]) => {
+      if (++reads > 50) throw new Error('clearQueue never stopped');
+      return realGet(...(args as [string, object]));
+    });
+    await clearQueue(swell);
+    expect(collections['/queue-items']).toHaveLength(1);
   });
 });
