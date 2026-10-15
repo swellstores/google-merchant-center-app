@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.swell.store/model.json",
+  "collection": "markets",
+  "label": "Google markets",
+  "description": "Where products are listed: country, language, currency and product link. Each has its own Merchant Center data source.",
+  "fields": {
+    "country": { "type": "string", "required": true, "description": "ISO 3166-1 alpha-2, the Merchant Center feed label" },
+    "language": { "type": "string", "required": true, "description": "ISO 639-1 content language" },
+    "currency": { "type": "string", "required": true },
+    "link_template": { "type": "string", "required": true, "description": "Product link with {slug}, {product_id}, {variant_id}, {locale}, {currency}" },
+    "data_source": { "type": "string", "description": "accounts/{a}/dataSources/{id}, created on the first send" }
+  }
+}

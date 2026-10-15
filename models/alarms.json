@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.swell.store/model.json",
+  "collection": "alarms",
+  "label": "Google courier alarm",
+  "description": "When the courier runs next. The courier function is scheduled on wake_at; null means nothing to do.",
+  "fields": {
+    "wake_at": { "type": "date" }
+  }
+}

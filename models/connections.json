@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.swell.store/model.json",
+  "collection": "connections",
+  "label": "Google connections",
+  "description": "The store's Merchant Center connection: service-account key, account and cached access token. One record per store.",
+  "fields": {
+    "status": { "type": "string", "enum": ["disconnected", "connected", "broken"], "default": "disconnected" },
+    "merchant_id": { "type": "string" },
+    "client_email": { "type": "string" },
+    "project_id": { "type": "string" },
+    "private_key_id": { "type": "string", "private": true },
+    "private_key": { "type": "string", "private": true },
+    "access_token": { "type": "string", "private": true },
+    "access_token_expires": { "type": "date" },
+    "registered": { "type": "bool" },
+    "last_error": { "type": "string" },
+    "date_connected": { "type": "date" },
+    "date_checked": { "type": "date" }
+  }
+}

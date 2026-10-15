@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.swell.store/model.json",
+  "collection": "products",
+  "description": "Google Merchant Center fields and sync state of a product, under $app.google_merchant_center",
+  "fields": {
+    "excluded": { "type": "bool", "description": "Keep the product out of Google" },
+    "brand": { "type": "string" },
+    "mpn": { "type": "string" },
+    "condition": { "type": "string", "enum": ["new", "used", "refurbished"] },
+    "google_category": { "type": "string", "description": "Google product taxonomy id or path" },
+    "age_group": { "type": "string", "enum": ["newborn", "infant", "toddler", "kids", "adult"] },
+    "gender": { "type": "string", "enum": ["male", "female", "unisex"] },
+    "identifier_exists": { "type": "bool" },
+    "identifiers": { "type": "object", "description": "{ <variant id or \"product\">: { gtin, mpn } }" },
+    "sync_state": { "type": "string", "enum": ["sent", "error", "skipped"] },
+    "sync_reason": { "type": "string" },
+    "sync_error": { "type": "string" },
+    "date_synced": { "type": "date" },
+    "input_ids": { "type": "array", "value_type": "string", "description": "Product inputs last sent, language~country~offerId" }
+  }
+}

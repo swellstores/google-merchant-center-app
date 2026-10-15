@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json.swell.store/content.json",
+  "collection": "products",
+  "label": "Products",
+  "description": "A Google tab on the product page",
+  "fields": [
+    { "id": "excluded", "label": "Hide from Google", "type": "toggle", "description": "Keep this product out of Google Shopping and free listings" },
+    { "id": "brand", "label": "Brand", "type": "text" },
+    { "id": "mpn", "label": "MPN", "type": "text", "description": "Manufacturer part number" },
+    {
+      "id": "condition",
+      "label": "Condition",
+      "type": "select",
+      "options": [
+        { "value": "new", "label": "New" },
+        { "value": "used", "label": "Used" },
+        { "value": "refurbished", "label": "Refurbished" }
+      ]
+    },
+    { "id": "google_category", "label": "Google product category", "type": "text", "description": "Category id or path from Google's product taxonomy" },
+    {
+      "id": "age_group",
+      "label": "Age group",
+      "type": "select",
+      "options": [
+        { "value": "newborn", "label": "Newborn" },
+        { "value": "infant", "label": "Infant" },
+        { "value": "toddler", "label": "Toddler" },
+        { "value": "kids", "label": "Kids" },
+        { "value": "adult", "label": "Adult" }
+      ]
+    },
+    {
+      "id": "gender",
+      "label": "Gender",
+      "type": "select",
+      "options": [
+        { "value": "male", "label": "Male" },
+        { "value": "female", "label": "Female" },
+        { "value": "unisex", "label": "Unisex" }
+      ]
+    },
+    { "id": "identifier_exists", "label": "Has a GTIN or MPN", "type": "toggle", "default": true },
+    {
+      "id": "sync_state",
+      "label": "Google sync",
+      "type": "select",
+      "readonly": true,
+      "options": [
+        { "value": "sent", "label": "Sent" },
+        { "value": "error", "label": "Error" },
+        { "value": "skipped", "label": "Not sent" }
+      ]
+    },
+    { "id": "sync_reason", "label": "Why not sent", "type": "short_text", "readonly": true },
+    { "id": "sync_error", "label": "Last Google error", "type": "long_text", "readonly": true },
+    { "id": "date_synced", "label": "Last sent", "type": "datetime", "readonly": true }
+  ],
+  "views": [
+    {
+      "id": "edit",
+      "tabs": [
+        {
+          "id": "google",
+          "label": "Google",
+          "fields": [
+            { "id": "excluded" },
+            { "type": "field_row", "fields": [{ "id": "brand" }, { "id": "mpn" }] },
+            { "type": "field_row", "fields": [{ "id": "condition" }, { "id": "identifier_exists" }] },
+            { "id": "google_category" },
+            { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] },
+            { "type": "field_row", "fields": [{ "id": "sync_state" }, { "id": "date_synced" }] },
+            { "id": "sync_reason" },
+            { "id": "sync_error" }
+          ]
+        }
+      ]
+    }
+  ]
+}

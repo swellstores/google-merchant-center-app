@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json.swell.store/model.json",
+  "collection": "sync-states",
+  "label": "Google sync state",
+  "description": "The courier's running mark, back-off, catalog sync job and Merchant API quota. One record per store.",
+  "fields": {
+    "running_since": { "type": "date" },
+    "backoff": { "type": "int", "default": 0 },
+    "last_error": { "type": "string" },
+    "full_sync": {
+      "type": "object",
+      "fields": {
+        "status": { "type": "string", "enum": ["running", "done"] },
+        "cursor": { "type": "string" },
+        "total": { "type": "int" },
+        "done": { "type": "int" },
+        "date_started": { "type": "date" },
+        "date_finished": { "type": "date" }
+      }
+    },
+    "quota": {
+      "type": "object",
+      "fields": {
+        "minute_limit": { "type": "int" },
+        "daily_limit": { "type": "int" },
+        "date_checked": { "type": "date" },
+        "exhausted_until": { "type": "date" }
+      }
+    }
+  }
+}
