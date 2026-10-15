@@ -1,5 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { createPortal } from 'preact/compat';
+import { useEffect, useRef } from 'preact/hooks';
 
 export const theme = {
   font: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
@@ -48,7 +49,7 @@ export function Button(props: { kind?: 'primary' | 'secondary' | 'danger'; disab
 
 export function Notice({ tone, children }: { tone: 'ok' | 'bad' | 'info'; children: ComponentChildren }) {
   const colors = { ok: [theme.ok, theme.okBg], bad: [theme.bad, theme.badBg], info: [theme.info, theme.infoBg] }[tone];
-  return <div style={{ color: colors[0], background: colors[1], borderRadius: 6, padding: '10px 12px' }}>{children}</div>;
+  return <div role={tone === 'bad' ? 'alert' : undefined} style={{ color: colors[0], background: colors[1], borderRadius: 6, padding: '10px 12px' }}>{children}</div>;
 }
 
 export function Label({ text, hint, children }: { text: string; hint?: ComponentChildren; children: ComponentChildren }) {
@@ -70,11 +71,11 @@ export const inputStyle = {
   background: '#fff',
 } as const;
 
-export function Checklist({ items }: { items: { ok: boolean; message: string; help?: string }[] }) {
+export function Checklist({ items }: { items: { id?: string; ok: boolean; message: string; help?: string }[] }) {
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
       {items.map((item) => (
-        <li key={item.message} style={{ display: 'flex', gap: 8 }}>
+        <li key={item.id ?? item.message} style={{ display: 'flex', gap: 8 }}>
           <span aria-hidden="true" style={{ color: item.ok ? theme.ok : theme.bad, fontWeight: 700 }}>
             {item.ok ? '✓' : '✕'}
           </span>
@@ -90,15 +91,29 @@ export function Checklist({ items }: { items: { ok: boolean; message: string; he
 
 /** Covers the admin while open: a fixed element rendered straight into document.body. */
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
+  const dialog = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    dialog.current?.querySelector<HTMLElement>('button, input, select, textarea')?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      previous?.focus?.();
+    };
+  }, []);
   return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-label={title}
-      onKeyDown={(event) => event.key === 'Escape' && onClose()}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(17, 24, 39, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: theme.font }}
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(17, 24, 39, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: theme.font }}
     >
-      <div style={{ background: '#fff', borderRadius: 8, padding: 20, width: 'min(480px, 90vw)' }}>
+      <div ref={dialog} style={{ background: '#fff', borderRadius: 8, padding: 20, width: 'min(480px, 90vw)' }}>
         <Stack>
           <strong style={{ fontSize: 16 }}>{title}</strong>
           {children}

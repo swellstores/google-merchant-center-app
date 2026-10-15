@@ -66,7 +66,8 @@ export default function GoogleConnect(props: ComponentProps) {
   const [removeProducts, setRemoveProducts] = useState(true);
   const emailRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  function load() {
+    setError(null);
     callRoute<StatusView>(props.fetch, 'connection')
       .then((next) => {
         setView(next);
@@ -75,7 +76,9 @@ export default function GoogleConnect(props: ComponentProps) {
         setLinkTemplate(next.market?.link_template ?? next.defaults.link_template);
       })
       .catch((e) => setError(messageOf(e)));
-  }, [props.fetch]);
+  }
+
+  useEffect(load, [props.fetch]);
 
   const summary = keyText ? summarizeKey(keyText) : null;
   const email = summary && 'clientEmail' in summary ? summary.clientEmail : view?.connection.client_email;
@@ -126,12 +129,29 @@ export default function GoogleConnect(props: ComponentProps) {
   }
 
   async function readFile(event: Event) {
-    const file = (event.currentTarget as HTMLInputElement).files?.[0];
-    if (file) setKeyText(await file.text());
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      setKeyText(await file.text());
+    } catch (e) {
+      setError(messageOf(e));
+    }
+    input.value = '';
   }
 
-  if (!view && !error) return <Stack>Loading…</Stack>;
-  const status = view?.connection.status ?? 'disconnected';
+  if (!view) {
+    if (!error) return <Stack>Loading…</Stack>;
+    return (
+      <Stack>
+        <Notice tone="bad">{error}</Notice>
+        <div>
+          <Button onClick={load}>Retry</Button>
+        </div>
+      </Stack>
+    );
+  }
+  const status = view.connection.status;
 
   return (
     <Stack gap={16}>
@@ -228,6 +248,7 @@ export default function GoogleConnect(props: ComponentProps) {
             <input type="checkbox" checked={removeProducts} onChange={(event) => setRemoveProducts((event.currentTarget as HTMLInputElement).checked)} />
             Also remove the products this store sent to Google
           </label>
+          {error && <Notice tone="bad">{error}</Notice>}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <Button kind="secondary" onClick={() => setConfirming(false)}>
               Cancel
