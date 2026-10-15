@@ -21,7 +21,7 @@ export interface DeliveryEnv {
 export interface DeliveryReport {
   done: WorkUnit[];
   kept: WorkUnit[];
-  /** Units the run never reached: none of their calls got an answer */
+  /** Units none of whose calls went out in a batch */
   untouched: WorkUnit[];
   sentOps: number;
   /** Stops the run: auth, daily quota, or a whole batch that failed */
@@ -60,21 +60,24 @@ async function readProducts(env: DeliveryEnv, ids: string[]): Promise<Map<string
 function planUnit(env: DeliveryEnv, unit: WorkUnit, product: SwellProduct | null): Plan {
   const ops: Op[] = [];
   const partId = () => `${unit.productId}-${ops.length}`;
+  const done = new Set(unit.doneInputIds ?? []);
   const addDelete = (inputId: string) => {
+    if (done.has(inputId)) return; // deleted earlier in this revision
     const dataSource = marketOfInput(env.markets, inputId)?.data_source;
     if (!dataSource) return;
     ops.push({ kind: 'delete', inputId, part: { id: partId(), call: deleteProductInput(env.accountId, dataSource, parseInputId(inputId)) } });
   };
 
   if (unit.kind === 'delete' || !product) {
-    new Set([...unit.inputIds, ...(unit.doneInputIds ?? [])]).forEach(addDelete);
-    return { unit, product: null, skipped: null, ops, known: new Set(), carried: [] };
+    unit.inputIds.forEach(addDelete);
+    return { unit, product: null, skipped: null, ops, known: new Set(unit.inputIds), carried: [] };
   }
 
   const fields: GoogleFields = product.$app?.[env.ctx.appId] ?? {};
   const previous = fields.input_ids ?? [];
-  const done = new Set(unit.doneInputIds ?? []);
-  const known = new Set([...previous, ...done]);
+  // Offers Google may hold: recorded on the product, carried over from an
+  // earlier revision of the queue item, or sent earlier in this one.
+  const known = new Set([...previous, ...unit.inputIds, ...done]);
   const build = buildOffers(product, env.markets, { appId: env.ctx.appId, defaults: env.defaults, version: String(env.ctx.now()) });
   for (const offer of build.offers) {
     if (done.has(offer.inputId)) continue;
@@ -109,6 +112,7 @@ interface Settled {
 
 function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResult>, attempted: Set<string>): Settled {
   const sent: string[] = [];
+  const completed: string[] = [];
   const stillThere: string[] = [];
   const errors: string[] = [];
   let keep = false;
@@ -125,11 +129,15 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
     }
     if (result.status >= 200 && result.status < 300) {
       if (op.kind !== 'delete') sent.push(op.inputId);
+      completed.push(op.inputId);
       continue;
     }
     const kind = classifyGoogleError(result.status, result.body);
     const message = errorMessage(result.body, result.status);
-    if (op.kind === 'delete' && kind === 'not_found') continue;
+    if (op.kind === 'delete' && kind === 'not_found') {
+      completed.push(op.inputId);
+      continue;
+    }
     if (op.kind === 'patch' && kind === 'not_found') {
       keep = true;
       upgrade = true;
@@ -149,7 +157,7 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
     if (op.kind === 'delete' || plan.known.has(op.inputId)) stillThere.push(op.inputId);
   }
 
-  if (keep) return { keep, upgrade, error: errors[0] ?? null, fatal, progress: sent };
+  if (keep) return { keep, upgrade, error: errors[0] ?? null, fatal, progress: completed };
   if (!plan.product) return { keep: false };
   const date_synced = iso(env.ctx.now());
   if (plan.skipped) {
@@ -169,8 +177,9 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
 
 /**
  * Sends the units' offers in batches of at most 100 while the budget lasts and
- * sorts each unit into done or kept. A unit is done only when Google answered
- * every one of its calls with something final.
+ * sorts each unit into done, kept or untouched. A unit is done only when Google
+ * answered every one of its calls with something final; kept units report the
+ * calls that completed; untouched units never went out.
  */
 export async function deliver(env: DeliveryEnv, units: WorkUnit[]): Promise<DeliveryReport> {
   const products = await readProducts(env, units.filter((u) => u.kind !== 'delete').map((u) => u.productId));

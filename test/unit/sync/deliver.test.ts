@@ -166,6 +166,38 @@ describe('deliver', () => {
     expect(report.untouched.map((u) => u.productId)).toEqual(['p2']);
   });
 
+  it('continues deleting a product too big for one run', async () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `en~US~v${i}`);
+    const first = setup([], {}, steppingClock(undefined, 3000));
+    ids.forEach((id) => first.google.inputs.set(`${DS}|${id}`, {}));
+    const report = await deliver(first.env, [unit('gone', 'delete', { inputIds: ids })]);
+    expect(report.kept).toHaveLength(1);
+    expect(report.kept[0].progress).toHaveLength(100);
+    expect(first.google.inputs.size).toBe(50);
+
+    const second = setup([]);
+    ids.slice(100).forEach((id) => second.google.inputs.set(`${DS}|${id}`, {}));
+    const again = await deliver(second.env, [unit('gone', 'delete', { inputIds: ids, doneInputIds: report.kept[0].progress })]);
+    expect(second.google.batches()).toBe(1);
+    expect(again.done).toHaveLength(1);
+    expect(second.google.inputs.size).toBe(0);
+  });
+
+  it('deletes offers carried over from an earlier revision that vanished', async () => {
+    const { google, env } = setup([mug()]);
+    google.inputs.set(`${DS}|en~US~vOld`, {});
+    await deliver(env, [unit('p1', 'full', { inputIds: ['en~US~vOld'] })]);
+    expect(google.inputs.has(`${DS}|en~US~vOld`)).toBe(false);
+  });
+
+  it('skips a delete done earlier in this revision', async () => {
+    const { google, env } = setup([]);
+    google.inputs.set(`${DS}|en~US~v2`, {});
+    await deliver(env, [unit('gone', 'delete', { inputIds: ['en~US~v1', 'en~US~v2'], doneInputIds: ['en~US~v1'] })]);
+    expect(google.requests.filter((r) => r.method === 'DELETE')).toHaveLength(1);
+    expect(google.inputs.size).toBe(0);
+  });
+
   it('skips offers sent earlier in this revision', async () => {
     const variants = Array.from({ length: 120 }, (_, i) => ({ id: `v${i}`, name: `V${i}`, active: true }));
     const { google, env, appFields } = setup([mug({ variants: { results: variants } })]);

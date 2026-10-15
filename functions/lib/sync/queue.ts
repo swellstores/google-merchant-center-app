@@ -53,8 +53,10 @@ export async function enqueue(swell: SwellClient, plan: { productId: string; kin
   await swell.put(`${COLLECTION}/${current.id}`, {
     kind: mergeKind(current.kind, plan.kind),
     revision: (current.revision ?? 0) + 1,
+    // The product changed: every offer is sent again. Offers sent for the old
+    // revision stay known, so the courier deletes them if they vanished.
+    input_ids: [...new Set([...(current.input_ids ?? []), ...(current.done_input_ids ?? []), ...(plan.inputIds ?? [])])],
     done_input_ids: [],
-    ...(plan.inputIds?.length ? { input_ids: [...new Set([...(current.input_ids ?? []), ...plan.inputIds])] } : {}),
   });
 }
 
@@ -89,7 +91,8 @@ export function unitsFromQueue(items: QueueItem[]): WorkUnit[] {
     unit.queueItemIds.push(item.id);
     unit.attempts = Math.max(unit.attempts, item.attempts ?? 0);
     unit.revisions![item.id] = item.revision ?? 0;
-    unit.doneInputIds = [...new Set([...(unit.doneInputIds ?? []), ...(item.done_input_ids ?? [])])];
+    // Only progress every item agrees on: an item edited meanwhile has none.
+    unit.doneInputIds = (unit.doneInputIds ?? []).filter((id) => (item.done_input_ids ?? []).includes(id));
   }
   return [...byProduct.values()];
 }
