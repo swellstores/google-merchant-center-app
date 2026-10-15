@@ -44,6 +44,7 @@ interface ConnectResult {
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const countryName = (code: string) => COUNTRIES.find(([c]) => c === code)?.[1] ?? code;
 
 const STEPS = [
   { text: 'Create a Google Cloud project.', href: 'https://console.cloud.google.com/projectcreate' },
@@ -63,6 +64,7 @@ export default function GoogleConnect(props: ComponentProps) {
   const [linkTemplate, setLinkTemplate] = useState('');
   const [checks, setChecks] = useState<Check[]>([]);
   const [confirming, setConfirming] = useState(false);
+  const [changingCountry, setChangingCountry] = useState(false);
   const [removeProducts, setRemoveProducts] = useState(true);
   const emailRef = useRef<HTMLInputElement>(null);
 
@@ -102,6 +104,16 @@ export default function GoogleConnect(props: ComponentProps) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function requestConnect() {
+    if (view?.connection.status === 'connected' && view.market && country !== view.market.country) setChangingCountry(true);
+    else connect();
+  }
+
+  function changeCountry() {
+    setChangingCountry(false);
+    connect();
   }
 
   async function disconnect() {
@@ -231,7 +243,7 @@ export default function GoogleConnect(props: ComponentProps) {
       {checks.length > 0 && <Checklist items={checks} />}
 
       <div style={{ display: 'flex', gap: 8 }}>
-        <Button disabled={busy} onClick={connect}>
+        <Button disabled={busy} onClick={requestConnect}>
           {busy ? 'Checking…' : status === 'disconnected' ? 'Connect' : 'Check again'}
         </Button>
         {status !== 'disconnected' && (
@@ -240,6 +252,22 @@ export default function GoogleConnect(props: ComponentProps) {
           </Button>
         )}
       </div>
+
+      {changingCountry && view.market && (
+        <Modal title="Change the country?" onClose={() => setChangingCountry(false)}>
+          <span>
+            Your products listed for {countryName(view.market.country)} will be removed from Google and sent again for {countryName(country)}.
+          </span>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <Button kind="secondary" onClick={() => setChangingCountry(false)}>
+              Cancel
+            </Button>
+            <Button kind="danger" disabled={busy} onClick={changeCountry}>
+              Change country
+            </Button>
+          </div>
+        </Modal>
+      )}
 
       {confirming && (
         <Modal title="Disconnect Google Merchant Center?" onClose={() => setConfirming(false)}>
