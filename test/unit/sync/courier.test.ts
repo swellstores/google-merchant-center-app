@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadConnection } from '../../../functions/lib/connection/store';
 import { loadMarkets } from '../../../functions/lib/connection/markets';
-import { loadAlarm } from '../../../functions/lib/sync/alarm';
+import { loadAlarm, setAlarm } from '../../../functions/lib/sync/alarm';
 import { NEXT_RUN_MS, pacedDelay, runCourier } from '../../../functions/lib/sync/courier';
 import { enqueue, queueCount } from '../../../functions/lib/sync/queue';
 import { loadState, saveState } from '../../../functions/lib/sync/state';
@@ -20,9 +20,13 @@ const at = (ms: number) => new Date(ms).toISOString();
 const MUG = { id: 'p1', name: 'Mug', slug: 'mug', active: true, price: 12, images: [{ file: { url: 'https://cdn.example.com/mug.jpg' } }] };
 
 function setup(googleOptions: FakeGoogleOptions = {}, connection: Record<string, any> = {}) {
+  return setupMany([MUG], googleOptions, connection);
+}
+
+function setupMany(products: Record<string, any>[], googleOptions: FakeGoogleOptions = {}, connection: Record<string, any> = {}) {
   const google = createFakeGoogle(googleOptions);
   const fake = createFakeSwell({
-    products: [MUG],
+    products,
     connection: {
       status: 'connected',
       merchant_id: '123',
@@ -53,16 +57,53 @@ describe('runCourier', () => {
     expect(await queueCount(swell)).toBe(0);
     expect((await loadAlarm(swell)).wake_at).toBeNull();
     expect((await loadState(swell)).running_since).toBeNull();
+    expect((await loadState(swell)).not_before).toBeNull();
   });
 
-  it('exits and re-arms while another run is fresh', async () => {
+  it('leaves everything alone while another run works', async () => {
     const { ctx, swell, google } = setup();
     const state = await loadState(swell);
     await saveState(swell, state.id, { running_since: at(NOW - 5_000) });
+    await setAlarm(ctx, NOW + 5_000);
     await enqueue(swell, { productId: 'p1', kind: 'full' });
-    expect(await runCourier(ctx)).toEqual({ next: 'soon', sent: 0 });
+    expect(await runCourier(ctx)).toEqual({ next: 'busy', sent: 0 });
     expect(google.requests).toHaveLength(0);
+    expect((await loadAlarm(swell)).wake_at).toBe(at(NOW + 5_000));
+    expect(await queueCount(swell)).toBe(1);
+  });
+
+  it('leaves everything alone before the time the last run asked for', async () => {
+    const { ctx, swell, google } = setup();
+    const state = await loadState(swell);
+    await saveState(swell, state.id, { not_before: at(NOW + 60_000) });
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    expect(await runCourier(ctx)).toEqual({ next: 'early', sent: 0 });
+    expect(google.requests).toHaveLength(0);
+    expect(await queueCount(swell)).toBe(1);
+  });
+
+  it('releases the run mark and re-arms after an unexpected error', async () => {
+    const { ctx, swell } = setup();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    const get = swell.get;
+    swell.get = (async (url: string, query?: any) => {
+      if (url === '/products') throw new Error('boom');
+      return get(url, query);
+    }) as typeof get;
+    await expect(runCourier(ctx)).rejects.toThrow('boom');
+    const state = await loadState(swell);
+    expect(state.running_since).toBeNull();
+    expect(state.not_before).toBe(at(NOW + NEXT_RUN_MS));
     expect((await loadAlarm(swell)).wake_at).toBe(at(NOW + NEXT_RUN_MS));
+  });
+
+  it('does not retry kept units in the same run', async () => {
+    const products = Array.from({ length: 50 }, (_, i) => ({ ...MUG, id: `p${String(i).padStart(2, '0')}`, slug: `p${i}` }));
+    const rate = { status: 429, body: { error: { message: 'quota/request_rate_too_high' } } };
+    const { ctx, swell, collections } = setupMany(products, { offerErrors: { p00: rate } });
+    for (const p of products) await enqueue(swell, { productId: p.id, kind: 'full' });
+    await runCourier(ctx);
+    expect(collections['/queue-items'].find((q) => q.product_id === 'p00')?.attempts).toBe(1);
   });
 
   it('proceeds when running_since is stale', async () => {
@@ -91,6 +132,7 @@ describe('runCourier', () => {
     expect(await queueCount(swell)).toBe(1);
     expect((await loadState(swell)).backoff).toBe(1);
     expect((await loadAlarm(swell)).wake_at).toBe(at(NOW + 30_000));
+    expect((await loadState(swell)).not_before).toBe(at(NOW + 30_000));
   });
 
   it('pauses until noon UTC when the daily quota is gone', async () => {
@@ -100,6 +142,7 @@ describe('runCourier', () => {
     const noon = Date.UTC(2026, 9, 15, 12);
     expect((await loadState(swell)).quota).toMatchObject({ exhausted_until: at(noon) });
     expect((await loadAlarm(swell)).wake_at).toBe(at(noon));
+    expect((await loadState(swell)).not_before).toBe(at(noon));
   });
 
   it('marks the connection broken when Google refuses the key', async () => {

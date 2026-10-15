@@ -7,6 +7,7 @@ import { enqueue } from './queue';
 import { loadState, saveState, type FullSyncJob } from './state';
 
 export const JOB_PAGE = 25;
+const HANDOFF_CONCURRENCY = 10;
 
 /** Sends the whole catalog: a cursor over product ids that the courier advances. */
 export async function startFullSync(ctx: AppContext): Promise<FullSyncJob> {
@@ -18,7 +19,11 @@ export async function startFullSync(ctx: AppContext): Promise<FullSyncJob> {
   return job;
 }
 
-/** One page of the catalog. The cursor moves only over the leading products that are done. */
+/**
+ * One page of the catalog. The cursor moves past the whole page unless the run
+ * failed (then only over the leading done products); products that were kept
+ * or never reached go to the queue, which continues them across runs.
+ */
 export async function fullSyncPass(
   env: DeliveryEnv,
   job: FullSyncJob,
@@ -51,8 +56,13 @@ export async function fullSyncPass(
   } else {
     // Products too big for this run go to the queue, which continues them
     // across runs; the catalog sync never stalls on one.
-    for (const id of ids) {
-      if (!finished.has(id)) await enqueue(env.ctx.swell, { productId: id, kind: 'full' });
+    const leftovers = [...report.kept, ...report.untouched];
+    for (let i = 0; i < leftovers.length; i += HANDOFF_CONCURRENCY) {
+      await Promise.all(
+        leftovers
+          .slice(i, i + HANDOFF_CONCURRENCY)
+          .map((unit) => enqueue(env.ctx.swell, { productId: unit.productId, kind: 'full', inputIds: unit.progress ?? [] })),
+      );
     }
     cursor = ids[ids.length - 1];
     done += ids.length;

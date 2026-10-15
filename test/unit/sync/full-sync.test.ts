@@ -70,5 +70,7 @@ describe('catalog sync', () => {
     const queued = await takeQueue(swell, 10);
     expect(queued.map((q) => q.product_id).sort()).toEqual([big.id, small.id].sort());
     expect(queued.every((q) => q.kind === 'full')).toBe(true);
+    // The ids Google already holds for the big product stay known.
+    expect(queued.find((q) => q.product_id === big.id)?.input_ids).toHaveLength(google.inputs.size);
   });
 });

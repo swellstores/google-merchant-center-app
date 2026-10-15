@@ -71,4 +71,14 @@ describe('runHourly', () => {
     await runHourly(ctx);
     expect((await loadAlarm(swell)).wake_at).toBe(at(NOW + 10_000));
   });
+
+  it('does not wake the courier before the time the last run asked for', async () => {
+    const { ctx, swell } = setup();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    await setAlarm(testContext(swell, undefined, fixedClock(NOW - 3600_000)), NOW - 600_000);
+    const state = await loadState(swell);
+    await saveState(swell, state.id, { not_before: at(NOW + 600_000) });
+    await runHourly(ctx);
+    expect((await loadAlarm(swell)).wake_at).toBe(at(NOW - 600_000));
+  });
 });

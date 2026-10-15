@@ -51,5 +51,6 @@ export async function runHourly(ctx: AppContext): Promise<void> {
   if (!pending) return;
   const alarm = await loadAlarm(ctx.swell);
   const wakeAt = alarm.wake_at ? Date.parse(alarm.wake_at) : null;
-  if (wakeAt === null || wakeAt < now - STALL_MS) await setAlarm(ctx, now);
+  const notBefore = state.not_before ? Date.parse(state.not_before) : 0;
+  if ((wakeAt === null || wakeAt < now - STALL_MS) && !(notBefore > now)) await setAlarm(ctx, now);
 }

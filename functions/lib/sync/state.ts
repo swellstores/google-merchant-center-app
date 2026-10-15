@@ -19,6 +19,7 @@ export interface QuotaInfo {
 export interface SyncState {
   id: string;
   running_since?: string | null;
+  not_before?: string | null;
   backoff?: number;
   last_error?: string | null;
   full_sync?: FullSyncJob | null;
