@@ -37,4 +37,18 @@ describe('fetchAccessToken', () => {
     const error = await fetchAccessToken(fetchFn as unknown as typeof fetch, key, 0).catch((e) => e);
     expect(error.kind).toBe('server');
   });
+
+  it('treats a rate limit as a short wait, not a refused key', async () => {
+    const fetchFn = respond(429, { error: 'rate_limit_exceeded' });
+    const error = await fetchAccessToken(fetchFn as unknown as typeof fetch, key, 0).catch((e) => e);
+    expect(error).toBeInstanceOf(GoogleApiError);
+    expect(error.kind).toBe('rate');
+  });
+
+  it('treats an answer without a token as a server failure', async () => {
+    const fetchFn = respond(200, { token_type: 'Bearer' });
+    const error = await fetchAccessToken(fetchFn as unknown as typeof fetch, key, 0).catch((e) => e);
+    expect(error).toBeInstanceOf(GoogleApiError);
+    expect(error.kind).toBe('server');
+  });
 });

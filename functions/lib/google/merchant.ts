@@ -93,18 +93,22 @@ export const insertProductInput = (accountId: string, dataSource: string, input:
   body: input,
 });
 
-/** A field in the mask but missing from the body is cleared, which ends a sale. */
+/**
+ * A field in the mask but missing from the body is cleared, which ends a sale.
+ * Google takes `versionNumber` on insertions only.
+ */
 export function patchProductInput(
   accountId: string,
   dataSource: string,
   input: ProductInput,
   fields: (keyof ProductAttributes)[],
 ): GoogleCall {
+  const { versionNumber, ...body } = input;
   return {
     method: 'PATCH',
     path: `/products/v1/${account(accountId)}/productInputs/${productInputId(input)}`,
     query: { dataSource, updateMask: fields.map((field) => `productAttributes.${field}`).join(',') },
-    body: input,
+    body,
   };
 }
 

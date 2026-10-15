@@ -74,7 +74,7 @@ describe('merchant calls', () => {
       method: 'PATCH',
       path: '/products/v1/accounts/123/productInputs/en~US~v1',
       query: { dataSource: ds, updateMask: 'productAttributes.price,productAttributes.salePrice,productAttributes.availability' },
-      body: INPUT,
+      body: { offerId: 'v1', contentLanguage: 'en', feedLabel: 'US', productAttributes: INPUT.productAttributes },
     });
     expect(deleteProductInput('123', ds, INPUT)).toEqual({
       method: 'DELETE',

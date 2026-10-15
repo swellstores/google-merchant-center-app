@@ -1,9 +1,16 @@
-import { GoogleApiError } from './http';
+import { GoogleApiError, type GoogleErrorKind } from './http';
 import { signAssertion, TOKEN_URL, type ServiceAccountKey } from './jwt';
 
 export interface AccessToken {
   token: string;
   expiresAt: number;
+}
+
+/** Only a refusal of the key or the account is `auth`, which marks the connection broken. */
+function tokenErrorKind(status: number): GoogleErrorKind {
+  if (status === 429) return 'rate';
+  if (status >= 400 && status < 500 && status !== 408) return 'auth';
+  return 'server';
 }
 
 /** Exchanges a signed assertion for an access token. A refused key is an `auth` error. */
@@ -26,8 +33,7 @@ export async function fetchAccessToken(fetchFn: typeof fetch, key: ServiceAccoun
     error_description?: string;
   };
   if (!res.ok || !body.access_token) {
-    const kind = res.status >= 500 ? 'server' : 'auth';
-    throw new GoogleApiError(kind, res.status, body.error_description || body.error || `Token request failed (${res.status})`, body);
+    throw new GoogleApiError(tokenErrorKind(res.status), res.status, body.error_description || body.error || `Token request failed (${res.status})`, body);
   }
   return { token: body.access_token, expiresAt: nowMs + (body.expires_in ?? 3600) * 1000 };
 }

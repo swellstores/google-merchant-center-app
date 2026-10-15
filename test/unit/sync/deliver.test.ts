@@ -42,6 +42,7 @@ describe('deliver', () => {
     await deliver(env, [unit('p1', 'light')]);
     const patch = google.requests.find((r) => r.method === 'PATCH')!;
     expect(patch.path).toContain('updateMask=productAttributes.price%2CproductAttributes.salePrice%2CproductAttributes.availability');
+    expect(patch.body).not.toHaveProperty('versionNumber');
     expect(google.inputs.get(`${DS}|en~US~p1`)?.productAttributes).toMatchObject({ title: 'Mug', price: { amountMicros: '9000000' } });
   });
 
