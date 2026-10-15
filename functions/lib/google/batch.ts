@@ -69,7 +69,7 @@ export async function sendBatch(fetchFn: typeof fetch, token: string, parts: Bat
   } catch (error) {
     throw new GoogleApiError('server', 0, `Google could not be reached: ${String(error)}`);
   }
-  const text = await res.text();
+  const text = new TextDecoder().decode(await res.arrayBuffer());
   if (!res.ok) {
     const body = safeJson(text);
     throw new GoogleApiError(classifyGoogleError(res.status, body), res.status, errorMessage(body, res.status), body);
