@@ -1,0 +1,9 @@
+{
+  "id": "google_merchant_center",
+  "name": "Google Merchant Center",
+  "type": "integration",
+  "version": "1.0.0",
+  "description": "List your products in Google Shopping and free listings and keep them in sync",
+  "support_email": "support@swell.is",
+  "permissions": ["write_products"]
+}

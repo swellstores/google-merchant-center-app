@@ -1,0 +1,20 @@
+{
+  "description": "List your products in Google Shopping and free listings and keep them in sync",
+  "devDependencies": {
+    "@swell/app-types": "^1.2.0",
+    "typescript": "^5.9.3",
+    "@cloudflare/vitest-plugin": "1.4.x",
+    "vitest": "5.0.x",
+    "@swell/apps-sdk": "^2.0.0-alpha.7"
+  },
+  "name": "google_merchant_center",
+  "private": true,
+  "scripts": {
+    "typecheck": "([ -z \"$(find functions -name '*.ts' 2>/dev/null | head -1)\" ] || tsc --noEmit) && ([ ! -f test/tsconfig.json ] || tsc --build --noEmit test) && ([ ! -f components/tsconfig.json ] || tsc --noEmit -p components)",
+    "test": "vitest run"
+  },
+  "version": "1.0.0",
+  "workspaces": [
+    "frontend"
+  ]
+}
