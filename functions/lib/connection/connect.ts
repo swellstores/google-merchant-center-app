@@ -7,7 +7,7 @@ import { startFullSync } from '../sync/full-sync';
 import { clearQueue } from '../sync/queue';
 import { loadState, saveState } from '../sync/state';
 import { runChecks } from './checks';
-import { languageOf, loadMarkets, replaceMarket, type Market } from './markets';
+import { languageOf, loadMarkets, replaceMarket, type Market, type MarketInput } from './markets';
 import { keyOf, loadConnection, parseServiceAccountKey, publicConnection, saveConnection, type PublicConnection } from './store';
 import { accessTokenFor } from './token';
 
@@ -45,7 +45,8 @@ function validate(input: ConnectInput) {
 
 /**
  * Stores the key (pasted now or kept from before), runs every check and, when
- * all pass, creates the market and starts sending the catalog.
+ * all pass, creates the market and starts sending the catalog unless nothing
+ * it depends on changed.
  */
 export async function connect(ctx: AppContext, input: ConnectInput) {
   const existing = await loadConnection(ctx.swell);
@@ -72,19 +73,26 @@ export async function connect(ctx: AppContext, input: ConnectInput) {
     return { connection: publicConnection(connection), market: (await loadMarkets(ctx.swell))[0] ?? null, report };
   }
 
+  const markets = await loadMarkets(ctx.swell);
   // Data source names carry their account; any other account's are stale.
-  for (const market of await loadMarkets(ctx.swell)) {
+  for (const market of markets) {
     if (market.data_source && !market.data_source.startsWith(`accounts/${input.merchant_id}/`)) {
       await ctx.swell.put(`/markets/${market.id}`, { data_source: null });
     }
   }
   const details = await ctx.swell.get('/:details');
-  const market = await replaceMarket(ctx, token.token, {
+  const next: MarketInput = {
     country: input.country,
     language: languageOf(details?.locale),
     currency: details?.currency ?? 'USD',
     link_template: input.link_template,
-  });
+  };
+  const state = await loadState(ctx.swell);
+  const previous = markets.find((m) => m.country === next.country && m.language === next.language);
+  const marketChanged = !previous || previous.currency !== next.currency || previous.link_template !== next.link_template;
+  // A repeated check leaves a running or finished catalog sync alone.
+  const resend = existing?.status !== 'connected' || existing.merchant_id !== input.merchant_id || marketChanged || !state.full_sync;
+  const market = await replaceMarket(ctx, token.token, next);
   connection = await saveConnection(ctx.swell, connection.id, {
     status: 'connected',
     registered: true,
@@ -94,7 +102,7 @@ export async function connect(ctx: AppContext, input: ConnectInput) {
     date_connected: existing?.date_connected ?? now,
     date_checked: now,
   });
-  await startFullSync(ctx);
+  if (resend) await startFullSync(ctx);
   return { connection: publicConnection(connection), market, report };
 }
 

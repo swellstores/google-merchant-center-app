@@ -68,6 +68,24 @@ describe('connect', () => {
     expect(again.report.ok).toBe(true);
   });
 
+  it('does not restart the catalog sync on a repeated check', async () => {
+    const { ctx, swell } = setup();
+    await connect(ctx, INPUT());
+    const state = await loadState(swell);
+    await saveState(swell, state.id, { full_sync: { $set: { ...state.full_sync, cursor: 'p1' } } });
+    expect((await connect(ctx, INPUT())).report.ok).toBe(true);
+    expect((await loadState(swell)).full_sync).toMatchObject({ status: 'running', cursor: 'p1' });
+  });
+
+  it('restarts it when the link changes', async () => {
+    const { ctx, swell } = setup();
+    await connect(ctx, INPUT());
+    const state = await loadState(swell);
+    await saveState(swell, state.id, { full_sync: { $set: { ...state.full_sync, cursor: 'p1' } } });
+    await connect(ctx, { ...INPUT(), link_template: 'https://shop.example.com/p/{product_id}' });
+    expect((await loadState(swell)).full_sync).toMatchObject({ status: 'running', cursor: null });
+  });
+
   it("drops another account's data source after a failed attempt", async () => {
     const fake = createFakeSwell({
       products: [{ id: 'p1' }],
