@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { alarmWrite, armWrite, loadAlarm, setAlarm } from '../../../functions/lib/sync/alarm';
+import { alarmWrite, armWrite } from '../../../functions/lib/sync/alarm';
 import { NOW, testContext } from '../../helpers/context';
 import { createFakeSwell } from '../../helpers/fake-swell';
+import { loadAlarm, setAlarm } from '../../helpers/store';
 
 const at = (ms: number) => new Date(ms).toISOString();
 

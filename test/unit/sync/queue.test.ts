@@ -1,21 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppContext } from '../../../functions/lib/context';
 import { listOf, swellBatch } from '../../../functions/lib/swell-batch';
-import {
-  enqueue,
-  itemsRead,
-  MAX_ATTEMPTS,
-  mergeKind,
-  queueCount,
-  settleWrites,
-  takeQueue,
-  takeRead,
-  unitsFromQueue,
-  type QueueItem,
-  type WorkUnit,
-} from '../../../functions/lib/sync/queue';
+import { itemsRead, MAX_ATTEMPTS, mergeKind, settleWrites, takeRead, unitsFromQueue, type QueueItem, type WorkUnit } from '../../../functions/lib/sync/queue';
 import { APP_ID, testContext } from '../../helpers/context';
 import { batchesOf, createFakeSwell } from '../../helpers/fake-swell';
+import { enqueue, queueCount, takeQueue } from '../../helpers/store';
 
 afterEach(() => {
   vi.restoreAllMocks();

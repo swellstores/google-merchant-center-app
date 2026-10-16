@@ -1,4 +1,3 @@
-import type { SwellClient } from '../context';
 import type { BatchOp } from '../swell-batch';
 import { iso } from '../time';
 
@@ -57,12 +56,3 @@ export const newFullSyncJob = (now: number): FullSyncJob => ({
   date_started: iso(now),
   date_finished: null,
 });
-
-export async function loadState(swell: SwellClient): Promise<SyncState> {
-  const list = await swell.get(COLLECTION, FIRST);
-  return list?.results?.[0] ?? (await swell.post(COLLECTION, { backoff: 0 }));
-}
-
-export async function saveState(swell: SwellClient, id: string, patch: Record<string, unknown>): Promise<SyncState> {
-  return swell.put(`${COLLECTION}/${id}`, patch);
-}

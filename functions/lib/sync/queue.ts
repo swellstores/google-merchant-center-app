@@ -1,5 +1,5 @@
 import { connectionRead, type Connection } from '../connection/store';
-import type { AppContext, SwellClient } from '../context';
+import type { AppContext } from '../context';
 import { listOf, recordOf, swellBatch, type BatchOp } from '../swell-batch';
 import { iso } from '../time';
 import { alarmRead, armWrite, ENQUEUE_DELAY_MS, type Alarm } from './alarm';
@@ -72,13 +72,6 @@ export function enqueueWrite(current: QueueItem | undefined, plan: QueuePlan): B
   };
 }
 
-export async function enqueue(swell: SwellClient, plan: QueuePlan): Promise<void> {
-  const existing = await swell.get(COLLECTION, { where: { product_id: plan.productId }, limit: 1 });
-  const op = enqueueWrite(existing?.results?.[0], plan);
-  if (op.method === 'post') await swell.post(op.url, op.data!);
-  else await swell.put(op.url, op.data!);
-}
-
 /**
  * Queues a product's change and makes sure the courier comes within
  * ENQUEUE_DELAY_MS: one read, one write. While the store is not connected
@@ -111,16 +104,6 @@ export const productItemsRead = (productIds: string[]): BatchOp => ({
 });
 
 export const itemRemoval = (id: string): BatchOp => ({ method: 'delete', url: `${COLLECTION}/${id}` });
-
-export async function takeQueue(swell: SwellClient, limit: number): Promise<QueueItem[]> {
-  const list = await swell.get(COLLECTION, takeRead(limit).data);
-  return list?.results ?? [];
-}
-
-export async function queueCount(swell: SwellClient): Promise<number> {
-  const list = await swell.get(COLLECTION, { limit: 1 });
-  return list?.count ?? 0;
-}
 
 export function unitsFromQueue(items: QueueItem[]): WorkUnit[] {
   const byProduct = new Map<string, WorkUnit>();

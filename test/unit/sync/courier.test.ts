@@ -1,15 +1,13 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadConnection } from '../../../functions/lib/connection/store';
 import { loadMarkets } from '../../../functions/lib/connection/markets';
-import { loadAlarm, setAlarm } from '../../../functions/lib/sync/alarm';
 import { NEXT_RUN_MS, pacedDelay, PASS_PRODUCTS, runCourier } from '../../../functions/lib/sync/courier';
-import { enqueue, queueCount } from '../../../functions/lib/sync/queue';
-import { loadState, saveState } from '../../../functions/lib/sync/state';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
 import { APP_ID, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
 import { makeServiceAccountKey } from '../../helpers/keys';
+import { enqueue, loadAlarm, loadState, queueCount, saveState, setAlarm } from '../../helpers/store';
 
 let key: ServiceAccountKey;
 beforeAll(async () => {

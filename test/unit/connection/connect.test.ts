@@ -4,13 +4,11 @@ import { loadMarkets } from '../../../functions/lib/connection/markets';
 import { loadConnection, saveConnection } from '../../../functions/lib/connection/store';
 import { AppError, type AppContext } from '../../../functions/lib/context';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
-import { loadAlarm, setAlarm } from '../../../functions/lib/sync/alarm';
-import { enqueue, queueCount } from '../../../functions/lib/sync/queue';
-import { loadState, saveState } from '../../../functions/lib/sync/state';
 import { fixedClock, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
 import { makeServiceAccountKey } from '../../helpers/keys';
+import { enqueue, loadAlarm, loadState, queueCount, saveState, setAlarm } from '../../helpers/store';
 
 let key: ServiceAccountKey;
 let keyJson: string;

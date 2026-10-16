@@ -3,12 +3,12 @@ import type { Market } from '../../../functions/lib/connection/markets';
 import { Outbox, swellBatch } from '../../../functions/lib/swell-batch';
 import type { DeliveryEnv } from '../../../functions/lib/sync/deliver';
 import { fullSyncPass, JOB_PAGE, pageRead } from '../../../functions/lib/sync/full-sync';
-import { takeQueue } from '../../../functions/lib/sync/queue';
 import { newFullSyncJob, stateById } from '../../../functions/lib/sync/state';
 import { Budget } from '../../../functions/lib/time';
 import { fixedClock, NOW, steppingClock, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell } from '../../helpers/fake-swell';
+import { takeQueue } from '../../helpers/store';
 
 const MARKET: Market = { id: 'm1', country: 'US', language: 'en', currency: 'USD', link_template: 'https://s.example.com/p/{slug}', data_source: 'accounts/1/dataSources/1' };
 const product = (n: number) => ({
