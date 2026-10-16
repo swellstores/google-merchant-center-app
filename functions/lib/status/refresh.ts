@@ -2,7 +2,7 @@ import { MAX_BATCH_PARTS, sendBatch, type BatchResult } from '../google/batch';
 import { classifyGoogleError, errorMessage, GoogleApiError } from '../google/http';
 import { getProduct } from '../google/merchant';
 import type { GoogleFields, SwellProduct } from '../mapping/types';
-import { listOf, type BatchOp } from '../swell-batch';
+import { listOf, SWELL_WAVE, type BatchOp } from '../swell-batch';
 import type { DeliveryEnv } from '../sync/deliver';
 import type { PassResult } from '../sync/full-sync';
 import { enqueueWrite } from '../sync/queue';
@@ -48,7 +48,7 @@ export interface StatusSummary {
 }
 
 export const STATUS_PAGE = 50;
-/** Writes per pass: with the caller's reads they fit one server wave of `/:batch`. */
+/** Writes per pass at most: with the caller's reads they fit one server wave of `/:batch`. */
 export const STATUS_WRITES = 8;
 /** An offer Google drops sooner than this is sent again. */
 export const EXPIRY_MARGIN_MS = 7 * 86_400_000;
@@ -74,11 +74,14 @@ export function newStatusRefreshJob(now: number): StatusRefreshJob {
   };
 }
 
-/** The next page of products, with the app's fields only. */
+/**
+ * The next page of products, whole: a `fields` mask can drop `$app`, whose
+ * keys depend on the credentials, and every product would look unsent.
+ */
 export const statusPageRead = (job: StatusRefreshJob): BatchOp => ({
   method: 'get',
   url: '/products',
-  data: { ...(job.cursor ? { where: { id: { $gt: job.cursor } } } : {}), sort: 'id asc', limit: STATUS_PAGE, fields: 'id,name,$app' },
+  data: { ...(job.cursor ? { where: { id: { $gt: job.cursor } } } : {}), sort: 'id asc', limit: STATUS_PAGE },
 });
 
 /** The worst issues first, then the most common. */
@@ -138,8 +141,8 @@ function tally(tallies: IssueTally[], product: SwellProduct, issues: StatusIssue
  * advances (`newStatusRefreshJob` starts one). Every offer of a product goes
  * into one Google batch, so its status is whole; a product is written only
  * when its status changed. The cursor stops before the first product that did
- * not fit the batch or the pass's writes, or whose answer was a rate limit or
- * a server error: it comes first in the next pass.
+ * not fit the batch or the round trip's writes, or whose answer was a rate
+ * limit or a server error: it comes first in the next pass.
  *
  * `page` is the answer to `statusPageRead(job)` when the caller has it;
  * otherwise the page is read with the writes that wait. One round trip after
@@ -187,6 +190,8 @@ export async function statusRefreshPass(
   const now = env.ctx.now();
   const next = structuredClone(job);
   const writes: BatchOp[] = [];
+  // The round trip stays in one server wave with the writes that wait and the caller's reads.
+  const cap = Math.min(STATUS_WRITES, SWELL_WAVE - reads.length - env.outbox.size);
   let counted = 0;
   for (const [i, { product, fields, inputIds }] of entries.entries()) {
     if (!inputIds.length) {
@@ -201,7 +206,7 @@ export async function statusRefreshPass(
         ops.push({ method: 'put', url: `/products/${product.id}`, data: { $app: { [appId]: statusFields(status, now) } } });
       }
       if (resend) ops.push(enqueueWrite(undefined, { productId: product.id, kind: 'full' }));
-      if (writes.length + ops.length > STATUS_WRITES) break;
+      if (writes.length + ops.length > cap) break;
       writes.push(...ops);
       next.counters[status.status]++;
       if (resend) next.requeued++;

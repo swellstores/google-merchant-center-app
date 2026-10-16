@@ -89,12 +89,10 @@ const fieldsOf = (collections: Fake['collections'], n: number) =>
   collections['/products'].find((p) => p.id === idOf(n))!.$app?.[APP_ID];
 
 describe('status refresh pass', () => {
-  it('reads a page of products after the cursor with only the fields it needs', () => {
-    expect(statusPageRead(newStatusRefreshJob(NOW))).toEqual({
-      method: 'get', url: '/products', data: { sort: 'id asc', limit: STATUS_PAGE, fields: 'id,name,$app' },
-    });
+  it('reads a page of whole products after the cursor, without a field mask or variants', () => {
+    expect(statusPageRead(newStatusRefreshJob(NOW))).toEqual({ method: 'get', url: '/products', data: { sort: 'id asc', limit: STATUS_PAGE } });
     expect(statusPageRead({ ...newStatusRefreshJob(NOW), cursor: 'c1' }).data).toEqual({
-      where: { id: { $gt: 'c1' } }, sort: 'id asc', limit: STATUS_PAGE, fields: 'id,name,$app',
+      where: { id: { $gt: 'c1' } }, sort: 'id asc', limit: STATUS_PAGE,
     });
   });
 
@@ -223,12 +221,47 @@ describe('status refresh pass', () => {
   });
 
   it('a whole-batch failure keeps the cursor', async () => {
-    const { env, swell } = setup([product(1), product(2)], { batch: { status: 503, body: { error: { message: 'Service unavailable' } } } });
-    const job = newStatusRefreshJob(NOW);
+    const outage = { status: 503, body: { error: { message: 'Service unavailable' } } };
+    const { env, swell, google } = setup([product(1), product(2), product(3)], { batch: outage });
+    const started = newStatusRefreshJob(NOW);
+    const job: StatusRefreshJob = { ...started, cursor: idOf(1), checked: 1, counters: { ...started.counters, pending: 1 } };
     const pass = await statusRefreshPass(env, job, [stateById('s1')]);
-    expect(pass).toMatchObject({ job, sentOps: 0, progressed: false, answers: [] });
+    expect(google.batches()).toBe(1);
+    expect(pass.job).toBe(job);
+    expect(pass.job).toMatchObject({ cursor: idOf(1), checked: 1 });
+    expect(pass).toMatchObject({ sentOps: 0, progressed: false, answers: [] });
     expect(pass.failure).toMatchObject({ kind: 'server', status: 503 });
     expect(roundTrips(swell)).toBe(1);
+  });
+
+  it('a product that needs a status PUT and a requeue POST does not fit as the 8th write', async () => {
+    const products = Array.from({ length: 8 }, (_, i) => product(i + 1));
+    const statuses = { ...Object.fromEntries(products.map((_, i) => [offerOf(i + 1), approved()])), [offerOf(8)]: approved(6) };
+    const { env, swell } = setup(products, { statuses });
+    const first = await statusRefreshPass(env, newStatusRefreshJob(NOW));
+    expect(productPuts(swell)).toHaveLength(7);
+    expect(await takeQueue(swell, 10)).toEqual([]);
+    expect(first.job).toMatchObject({ status: 'running', cursor: idOf(7), checked: 7, requeued: 0 });
+    swell.post.mockClear();
+    const second = await statusRefreshPass(env, first.job);
+    expect(batchesOf(swell)[1].map((op) => [op.method, op.url])).toEqual([['put', `/products/${idOf(8)}`], ['post', '/queue-items']]);
+    expect(second.job).toMatchObject({ status: 'done', cursor: idOf(8), checked: 8, requeued: 1 });
+  });
+
+  it('the write cap leaves room for waiting writes and the caller’s reads', async () => {
+    const products = Array.from({ length: 10 }, (_, i) => product(i + 1));
+    const { env, swell, collections } = setup(products, { statuses: Object.fromEntries(products.map((_, i) => [offerOf(i + 1), approved()])) });
+    collections['/sync-states'].push({ id: 's1', backoff: 0 });
+    const job = newStatusRefreshJob(NOW);
+    const [page] = await swellBatch(swell, [statusPageRead(job)]);
+    swell.post.mockClear();
+    env.outbox.add(...['q1', 'q2', 'q3'].map((id) => ({ method: 'put' as const, url: `/queue-items/${id}`, data: { attempts: 1 } })));
+    const pass = await statusRefreshPass(env, job, [stateById('s1')], page);
+    const [trip] = batchesOf(swell);
+    expect(trip).toHaveLength(10);
+    expect(productPuts(swell)).toHaveLength(6);
+    expect(pass.job).toMatchObject({ cursor: idOf(6), checked: 6 });
+    expect(pass.answers).toEqual([expect.objectContaining({ id: 's1' })]);
   });
 
   it('a rate-limited part stops before its product', async () => {
