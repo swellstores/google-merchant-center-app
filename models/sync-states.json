@@ -5,6 +5,7 @@
   "description": "The courier's running mark, back-off, catalog sync job and Merchant API quota. One record per store.",
   "fields": {
     "running_since": { "type": "date" },
+    "run_seq": { "type": "int", "default": 0, "description": "Bumped atomically by every run's mark: of runs that start together, only the one that gets the next number works" },
     "not_before": { "type": "date", "description": "The courier works no earlier than this: back-off, pacing or the daily-quota pause. Earlier runs exit untouched." },
     "backoff": { "type": "int", "default": 0 },
     "last_error": { "type": "string" },

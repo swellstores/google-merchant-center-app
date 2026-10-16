@@ -20,6 +20,8 @@ export interface QuotaInfo {
 export interface SyncState {
   id: string;
   running_since?: string | null;
+  /** Bumped by each run's mark with `$inc`: the run lock */
+  run_seq?: number;
   not_before?: string | null;
   backoff?: number;
   last_error?: string | null;
@@ -41,10 +43,14 @@ const plain = (patch: Record<string, unknown>) =>
 
 /**
  * A patch of the state, creating the record when there is none yet. Objects
- * (`full_sync`, `quota`) are replaced whole with `{ $set: … }` so cleared fields really clear.
+ * (`full_sync`, `quota`) are replaced whole with `{ $set: … }` so cleared
+ * fields really clear; counters go up with a top-level `$inc`, which counts
+ * from 0 on a create.
  */
 export function stateWrite(id: string | null | undefined, patch: Record<string, unknown>): BatchOp {
-  return id ? { method: 'put', url: `${COLLECTION}/${id}`, data: patch } : { method: 'post', url: COLLECTION, data: { backoff: 0, ...plain(patch) } };
+  if (id) return { method: 'put', url: `${COLLECTION}/${id}`, data: patch };
+  const { $inc, ...rest } = patch as { $inc?: Record<string, number> };
+  return { method: 'post', url: COLLECTION, data: { backoff: 0, ...plain(rest), ...$inc } };
 }
 
 /** A catalog sync from the first product; the first page fills in `total`. */

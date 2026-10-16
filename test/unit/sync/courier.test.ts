@@ -51,7 +51,38 @@ async function steady(products: Record<string, any>[] = [MUG], googleOptions: Fa
   const store = setupMany(products, googleOptions, connection, { data_source: DS });
   const state = await loadState(store.swell);
   await saveState(store.swell, state.id, { quota: { $set: { minute_limit: 300, daily_limit: 5000, date_checked: at(NOW) } } });
+  await loadAlarm(store.swell);
   return store;
+}
+
+/** A Swell client of one run, which keeps the batches that run sent. */
+function ownClient(swell: ReturnType<typeof createFakeSwell>['swell']) {
+  const batches: { method: string; url: string; data?: any }[][] = [];
+  const client = {
+    get: (url: string, query?: object) => swell.get(url, query),
+    post: (url: string, data: any) => {
+      if (url === '/:batch') batches.push(data);
+      return swell.post(url, data);
+    },
+    put: (url: string, data: object) => swell.put(url, data),
+    delete: (url: string) => swell.delete(url),
+  };
+  return { client, batches };
+}
+
+/** Holds every run mark until `count` runs have made theirs: their start reads all came first. */
+function startTogether(swell: ReturnType<typeof createFakeSwell>['swell'], count: number) {
+  const post = swell.post.getMockImplementation()!;
+  let arrived = 0;
+  let release!: () => void;
+  const all = new Promise<void>((resolve) => (release = resolve));
+  swell.post.mockImplementation(async (url: string, data: any) => {
+    if (url === '/:batch' && data.some((op: any) => op.data?.$inc)) {
+      if (++arrived === count) release();
+      await all;
+    }
+    return post(url, data);
+  });
 }
 
 const opsOf = (batch: { method: string; url: string }[]) => batch.map((op) => `${op.method} ${op.url.replace(/\/[0-9a-f]{24}$/, '/:id')}`);
@@ -108,6 +139,7 @@ describe('runCourier', () => {
 
   it('leaves a dead-man alarm while it works', async () => {
     const { ctx, swell } = setup();
+    await loadAlarm(swell);
     await enqueue(swell, { productId: 'p1', kind: 'full' });
     await runCourier(ctx);
     const alarmWrites = batchesOf(swell)
@@ -350,6 +382,52 @@ describe('runCourier', () => {
   });
 });
 
+describe('runCourier lock', () => {
+  it('lets only one of two runs that start together work', async () => {
+    const { swell, google, collections } = await steady();
+    await saveState(swell, (await loadState(swell)).id, { run_seq: 4 });
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    const runs = [ownClient(swell), ownClient(swell)];
+    startTogether(swell, 2);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const outcomes = await Promise.all(runs.map((run) => runCourier(testContext(run.client, google.fetch))));
+    expect(outcomes.map((o) => o.next).sort()).toEqual(['busy', 'idle']);
+    expect(google.batches()).toBe(1);
+    const loser = runs[outcomes.findIndex((o) => o.next === 'busy')];
+    // Its start read and its mark (with the prefetched products), nothing after: no alarm, no state.
+    expect(loser.batches.map(opsOf)).toEqual([
+      ['get /connections', 'get /sync-states', 'get /alarms', 'get /markets', 'get /queue-items'],
+      ['put /sync-states/:id', 'get /products'],
+    ]);
+    expect(collections['/sync-states'][0]).toMatchObject({ run_seq: 6, running_since: null });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('another run'));
+    warn.mockRestore();
+  });
+
+  it('leaves one chain after a burst of runs', async () => {
+    const products = many(PASS_PRODUCTS + 3);
+    const { swell, google } = await steady(products);
+    for (const p of products) await enqueue(swell, { productId: p.id, kind: 'full' });
+    const runs = [ownClient(swell), ownClient(swell), ownClient(swell)];
+    startTogether(swell, 3);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const outcomes = await Promise.all(runs.map((run) => runCourier(testContext(run.client, google.fetch))));
+    expect(outcomes.filter((o) => o.next === 'busy')).toHaveLength(2);
+    const alarmWrites = runs.map((run) => run.batches.flat().filter((op) => op.url.startsWith('/alarms') && op.method !== 'get').length);
+    // The winner's dead-man and its ending; the others none.
+    expect(alarmWrites.sort()).toEqual([0, 0, 2]);
+    warn.mockRestore();
+  });
+
+  it('creates the state of a fresh store with the run counter at 1 and works', async () => {
+    const { ctx, swell, collections } = await steady();
+    collections['/sync-states'].length = 0;
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    expect((await runCourier(ctx)).sent).toBe(1);
+    expect(collections['/sync-states'][0]).toMatchObject({ run_seq: 1 });
+  });
+});
+
 describe('runCourier round trips', () => {
   it('sends a queue in four round trips, the first pass’s read riding with the mark', async () => {
     const { ctx, swell, google } = await steady();
@@ -359,9 +437,11 @@ describe('runCourier round trips', () => {
     expect(google.inputs.size).toBe(1);
     const [start, mark, sent, end] = batchesOf(swell);
     expect(opsOf(start)).toEqual(['get /connections', 'get /sync-states', 'get /alarms', 'get /markets', 'get /queue-items']);
-    expect(opsOf(mark)).toEqual(['put /sync-states/:id', 'post /alarms', 'get /products']);
-    expect(mark[2].data).toMatchObject({ where: { id: { $in: ['p1'] } }, expand: ['variants:1000'] });
-    expect(opsOf(sent)).toEqual(['put /products/p1', 'get /queue-items', 'get /sync-states/:id']);
+    expect(opsOf(mark)).toEqual(['put /sync-states/:id', 'get /products']);
+    expect(mark[0].data).toMatchObject({ $inc: { run_seq: 1 }, running_since: at(NOW) });
+    expect(mark[1].data).toMatchObject({ where: { id: { $in: ['p1'] } }, expand: ['variants:1000'] });
+    // The dead-man alarm goes with the run's first round trip after the lock.
+    expect(opsOf(sent)).toEqual(['put /alarms/:id', 'put /products/p1', 'get /queue-items', 'get /sync-states/:id']);
     expect(opsOf(end)).toEqual(['delete /queue-items/:id', 'put /alarms/:id', 'put /sync-states/:id']);
     expect(swell.get).not.toHaveBeenCalled();
     expect(swell.put).not.toHaveBeenCalled();
@@ -376,9 +456,9 @@ describe('runCourier round trips', () => {
     forget(swell);
     expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 1 });
     const [, mark, sent] = batchesOf(swell);
-    expect(opsOf(mark)).toEqual(['put /sync-states/:id', 'post /alarms', 'get /products']);
-    expect(mark[2].data).toMatchObject({ sort: 'id asc', limit: PASS_PRODUCTS, expand: ['variants:1000'] });
-    expect(opsOf(sent)).toEqual(['put /products/p1', 'get /sync-states/:id']);
+    expect(opsOf(mark)).toEqual(['put /sync-states/:id', 'get /products']);
+    expect(mark[1].data).toMatchObject({ sort: 'id asc', limit: PASS_PRODUCTS, expand: ['variants:1000'] });
+    expect(opsOf(sent)).toEqual(['put /alarms/:id', 'put /products/p1', 'get /sync-states/:id']);
     expect(roundTrips(swell)).toBe(4);
     expect((await loadState(swell)).full_sync).toMatchObject({ status: 'done', total: 1, done: 1 });
   });
@@ -395,15 +475,15 @@ describe('runCourier round trips', () => {
     expect(roundTrips(swell)).toBe(6);
   });
 
-  it('creates a missing state and alarm in its first write', async () => {
+  it('creates a missing state in its first write', async () => {
     const { ctx, swell, collections } = await steady();
     collections['/sync-states'].length = 0;
     await enqueue(swell, { productId: 'p1', kind: 'full' });
     forget(swell);
     await runCourier(ctx);
-    expect(opsOf(batchesOf(swell)[1])).toEqual(['post /sync-states', 'post /alarms', 'get /products']);
+    expect(opsOf(batchesOf(swell)[1])).toEqual(['post /sync-states', 'get /products']);
+    expect(batchesOf(swell)[1][0].data).toMatchObject({ run_seq: 1 });
     expect(collections['/sync-states']).toHaveLength(1);
-    expect(collections['/alarms']).toHaveLength(1);
   });
 
   it('exits early after one read', async () => {
@@ -467,17 +547,22 @@ describe('runCourier round trips', () => {
     expect(await loadConnection(swell)).toMatchObject({ access_token: 'token-1' });
   });
 
-  it('takes the next queue items in the round trip that sends the last ones', async () => {
-    const products = many(PASS_PRODUCTS + 3);
+  it('takes the next queue items in one server wave: with a pass’s writes, or else with the settling writes', async () => {
+    const products = many(2 * PASS_PRODUCTS + 3);
     const { ctx, swell, collections } = await steady(products);
     for (const p of products) await enqueue(swell, { productId: p.id, kind: 'full' });
     forget(swell);
-    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: PASS_PRODUCTS + 3 });
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 2 * PASS_PRODUCTS + 3 });
     expect(collections['/queue-items']).toHaveLength(0);
-    const [, , firstSent, secondRead] = batchesOf(swell).map(opsOf);
+    const [, , firstSent, take, secondRead, secondSent, thirdRead] = batchesOf(swell).map(opsOf);
+    // The first pass's writes carry the dead-man alarm: no room left for the next items.
     expect(firstSent).toHaveLength(10);
-    expect(firstSent.at(-1)).toBe('get /queue-items');
-    expect(secondRead).toEqual([...Array(PASS_PRODUCTS).fill('delete /queue-items/:id'), 'get /products']);
+    expect(firstSent.at(-1)).toBe('get /sync-states/:id');
+    expect(take).toEqual([...Array(PASS_PRODUCTS).fill('delete /queue-items/:id'), 'get /queue-items']);
+    expect(secondRead).toEqual(['get /products']);
+    expect(secondSent).toHaveLength(10);
+    expect(secondSent.at(-1)).toBe('get /queue-items');
+    expect(thirdRead).toEqual([...Array(PASS_PRODUCTS).fill('delete /queue-items/:id'), 'get /products']);
   });
 
   it('works a queue of 50 off seven products a pass in batches of at most ten', async () => {

@@ -5,7 +5,7 @@ import { measured, type AppContext } from '../context';
 import { GoogleApiError } from '../google/http';
 import type { OfferDefaults } from '../mapping/offers';
 import type { SwellProduct } from '../mapping/types';
-import { countOf, entryError, listOf, Outbox, recordOf, SWELL_WAVE, swellBatch, type BatchOp } from '../swell-batch';
+import { countOf, listOf, Outbox, recordOf, SWELL_WAVE, swellBatch, type BatchOp } from '../swell-batch';
 import { Budget, iso, nextNoonUtc } from '../time';
 import { alarmRead, alarmWrite, type Alarm } from './alarm';
 import { deliver, PASS_PRODUCTS, productIdsOf, productsOf, productsRead, type DeliveryEnv } from './deliver';
@@ -181,9 +181,13 @@ async function work(run: Run): Promise<WorkResult> {
     outbox.add(...settled.writes);
     left ||= settled.removed.length < ids.length;
     // Kept units wait for the next run: no retries in the same run.
-    if (failure || report.kept.length || report.untouched.length || !next) break;
-    items = listOf<QueueItem>(answers[2], 'the queue');
-    waiting = countOf(answers[2]) - items.length;
+    if (failure || report.kept.length || report.untouched.length || !waiting) break;
+    // The next items did not fit in that wave: they come with the settling
+    // writes, when a pass with its own product read still fits.
+    if (!next && !gate(4)) break;
+    const take = next ? answers[2] : (await outbox.send([takeRead(PASS_PRODUCTS, taken)]))[0];
+    items = listOf<QueueItem>(take, 'the queue');
+    waiting = countOf(take) - items.length;
   }
   const queueMore = left || items.length > 0 || waiting > 0;
 
@@ -310,17 +314,28 @@ export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
     return finish(run, result);
   }
 
-  // A run killed at 10 s leaves no future run; the dead-man alarm comes after
-  // the mark expires and finds the next run already working (busy/early) or
-  // picks the work up. The ending's alarm write supersedes it in wake_at.
-  const deadManAt = now + RUNNING_TTL_MS + 5000;
-  const deadMan = alarmWrite(alarm, deadManAt);
+  // Runs that start together all pass the busy check: the mark bumps a
+  // counter atomically, and only the run that gets the next number works.
+  // The mark's running_since keeps later runs busy; a loser's lands in the
+  // same moment as the winner's, which the winner's end clears.
   const read = firstRead(start.queue, state?.full_sync);
-  const marking: BatchOp[] = [stateWrite(state?.id, { running_since: iso(now) }), ...(deadMan ? [deadMan] : []), ...(read ? [read] : [])];
+  const marking: BatchOp[] = [stateWrite(state?.id, { running_since: iso(now), $inc: { run_seq: 1 } }), ...(read ? [read] : [])];
   const answers = await swellBatch(ctx.swell, marking);
   const current = recordOf<SyncState>(answers[0], 'the run mark');
   if (!current?.id) throw new Error('Swell did not keep the run mark');
-  const armed = deadMan ? answers[1] : undefined;
+  if ((current.run_seq ?? 0) !== (state?.run_seq ?? 0) + 1) {
+    console.warn(`Courier: another run started at the same time and works (run ${current.run_seq})`);
+    return { next: 'busy', sent: 0 };
+  }
+
+  // A run killed at 10 s leaves no future run; the dead-man alarm comes after
+  // the mark expires and finds the next run already working (busy/early) or
+  // picks the work up. Only the winner sets it, with its next round trip; the
+  // ending's alarm write supersedes it. A store without an alarm record (none
+  // ever armed) gets none.
+  const deadManAt = now + RUNNING_TTL_MS + 5000;
+  const deadMan = alarm ? alarmWrite(alarm, deadManAt) : null;
+  if (deadMan) outbox.add(deadMan);
   const run: Run = {
     ctx,
     budget,
@@ -328,7 +343,7 @@ export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
     connection,
     state: current,
     quotaChanged: false,
-    alarm: deadMan && !entryError(armed) ? { id: (armed as Alarm | null)?.id ?? alarm!.id, wake_at: iso(deadManAt) } : alarm,
+    alarm: deadMan ? { id: alarm!.id, wake_at: iso(deadManAt) } : alarm,
     markets: start.markets,
     queue: start.queue,
     waiting: start.waiting,

@@ -62,6 +62,11 @@ function applyPatch(doc: Doc, patch: Doc): Doc {
       }
       continue;
     }
+    if (key === '$inc') {
+      // Atomic on the platform; the answer carries the new value.
+      for (const [field, by] of Object.entries<number>(value)) doc[field] = (doc[field] ?? 0) + by;
+      continue;
+    }
     if (key.startsWith('$')) throw new Error(`the fake store does not model ${key}`);
     doc[key] = merge(doc[key], value, true);
   }
