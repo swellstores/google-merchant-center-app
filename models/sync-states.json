@@ -53,6 +53,17 @@
         "duration_ms": { "type": "int" }
       }
     },
+    "orphan_scan": {
+      "type": "object",
+      "fields": {
+        "status": { "type": "string", "enum": ["running", "done"] },
+        "page_token": { "type": "string" },
+        "skip": { "type": "int" },
+        "found": { "type": "int" },
+        "date_started": { "type": "date" },
+        "date_finished": { "type": "date" }
+      }
+    },
     "summary": {
       "type": "object",
       "description": "The last finished status refresh",

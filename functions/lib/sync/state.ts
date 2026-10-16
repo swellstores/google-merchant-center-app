@@ -1,3 +1,4 @@
+import type { OrphanScanJob } from '../status/orphans';
 import type { StatusRefreshJob, StatusSummary } from '../status/refresh';
 import type { BatchOp } from '../swell-batch';
 import { iso } from '../time';
@@ -29,6 +30,7 @@ export interface SyncState {
   full_sync?: FullSyncJob | null;
   quota?: QuotaInfo | null;
   status_refresh?: StatusRefreshJob | null;
+  orphan_scan?: OrphanScanJob | null;
   /** The last finished status refresh */
   summary?: StatusSummary | null;
 }
