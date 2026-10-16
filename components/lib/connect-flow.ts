@@ -49,7 +49,8 @@ export async function checkThenActivate(
   on: { phase(phase: Phase): void; checked(answer: CheckAnswer): void },
 ): Promise<StatusView | null> {
   on.phase('checking');
-  const checked = (await call({ op: 'check', key: input.key, merchant_id: input.merchant_id })) as Partial<CheckAnswer> | null;
+  // The check also validates the market, so a wrong link fails before the store is connected.
+  const checked = (await call({ op: 'check', ...input })) as Partial<CheckAnswer> | null;
   if (!checked?.connection || !Array.isArray(checked.report?.checks)) throw new Error(UNFINISHED);
   on.checked(checked as CheckAnswer);
   if (!checked.report.ok) return null;

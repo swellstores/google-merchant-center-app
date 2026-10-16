@@ -21,14 +21,15 @@ import {
 } from './store';
 import { accessTokenFor } from './token';
 
-export interface CheckInput {
-  key?: string;
-  merchant_id: string;
-}
-
 export interface ActivateInput {
   country: string;
   link_template: string;
+}
+
+/** The market comes along only to be validated: `activate` sets it up. */
+export interface CheckInput extends ActivateInput {
+  key?: string;
+  merchant_id: string;
 }
 
 export interface StatusView {
@@ -62,18 +63,30 @@ function validateMarket(input: ActivateInput) {
   }
 }
 
+/** Data source names carry their account: another account's are stale. */
+const staleDataSources = (markets: Market[], merchantId: string): BatchOp[] =>
+  markets
+    .filter((market) => market.data_source && !market.data_source.startsWith(`accounts/${merchantId}/`))
+    .map((market) => ({ method: 'put', url: `/markets/${market.id}`, data: { data_source: null } }));
+
 /**
- * Stores the key (pasted now or kept from before) and runs every check. A
- * connected store stays connected while they run; when they pass it is
+ * Stores the key (pasted now or kept from before) and runs every check. The
+ * input is validated, the market's too, before anything is written. A
+ * connected store stays connected while the checks run; when they pass it is
  * connected with the token cached, otherwise it waits disconnected with the
  * reason. A store that was not connected, or now connects another account,
- * gets a new `date_connected`, which makes `activate` send the catalog again.
+ * gets a new `date_connected`, which makes `activate` send the catalog again;
+ * another account's data sources are forgotten with the result.
  */
 export async function check(ctx: AppContext, input: CheckInput): Promise<{ connection: PublicConnection; report: CheckReport }> {
-  const existing = await loadConnection(ctx.swell);
-  const key = input.key ? parseServiceAccountKey(input.key) : keyOf(existing);
-  if (!key) throw new AppError('key_required', 'Paste the service account key (JSON).');
+  const pasted = input.key ? parseServiceAccountKey(input.key) : null;
   validateMerchant(input.merchant_id);
+  validateMarket(input);
+  const answers = await swellBatch(ctx.swell, [connectionRead, marketsRead]);
+  const existing = firstOf<Connection>(answers[0], 'the connection');
+  const markets = listOf<Market>(answers[1], 'the markets');
+  const key = pasted ?? keyOf(existing);
+  if (!key) throw new AppError('key_required', 'Paste the service account key (JSON).');
 
   let id = existing?.id ?? null;
   if (!existing || existing.private_key !== key.private_key || existing.client_email !== key.client_email) {
@@ -97,17 +110,22 @@ export async function check(ctx: AppContext, input: CheckInput): Promise<{ conne
     return { connection: publicConnection(connection), report };
   }
   const reconnected = existing?.status !== 'connected' || existing.merchant_id !== input.merchant_id;
-  const connection = await saveConnection(ctx.swell, id, {
-    status: 'connected',
-    merchant_id: input.merchant_id,
-    registered: true,
-    last_error: null,
-    access_token: token.token,
-    access_token_expires: iso(token.expiresAt),
-    date_connected: reconnected ? now : (existing.date_connected ?? now),
-    date_checked: now,
-  });
-  return { connection: publicConnection(connection), report };
+  const writes: BatchOp[] = [
+    connectionWrite(id!, {
+      status: 'connected',
+      merchant_id: input.merchant_id,
+      registered: true,
+      last_error: null,
+      access_token: token.token,
+      access_token_expires: iso(token.expiresAt),
+      date_connected: reconnected ? now : (existing.date_connected ?? now),
+      date_checked: now,
+    }),
+    ...(existing?.merchant_id !== input.merchant_id ? staleDataSources(markets, input.merchant_id) : []),
+  ];
+  const results = await swellBatch(ctx.swell, writes);
+  results.forEach((result, i) => recordOf(result, `the write to ${writes[i].url}`));
+  return { connection: publicConnection(recordOf<Connection>(results[0], 'the connection')), report };
 }
 
 /**

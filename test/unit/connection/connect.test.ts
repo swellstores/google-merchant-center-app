@@ -24,8 +24,8 @@ afterEach(() => {
 });
 
 const at = (ms: number) => new Date(ms).toISOString();
-const CHECK = () => ({ key: keyJson, merchant_id: '123' });
 const MARKET = { country: 'US', link_template: 'https://shop.example.com/products/{slug}' };
+const CHECK = () => ({ key: keyJson, merchant_id: '123', ...MARKET });
 
 function setup(options: FakeGoogleOptions = {}) {
   const google = createFakeGoogle(options);
@@ -44,7 +44,7 @@ function forget(swell: ReturnType<typeof createFakeSwell>['swell']) {
 }
 
 async function connect(ctx: AppContext, market = MARKET, input = CHECK()) {
-  const checked = await check(ctx, input);
+  const checked = await check(ctx, { ...input, ...market });
   return checked.report.ok ? activate(ctx, market) : null;
 }
 
@@ -90,7 +90,7 @@ describe('check', () => {
     const { ctx, swell } = setup();
     await check(ctx, CHECK());
     forget(swell);
-    expect((await check(later(ctx), { merchant_id: '123' })).report.ok).toBe(true);
+    expect((await check(later(ctx), { ...CHECK(), key: undefined })).report.ok).toBe(true);
     // The key did not change: one read and the result.
     expect(roundTrips(swell)).toBe(2);
   });
@@ -123,6 +123,48 @@ describe('check', () => {
     const error = await check(ctx, { ...CHECK(), ...change }).catch((e) => e);
     expect(error).toBeInstanceOf(AppError);
     expect(error.code).toBe(code);
+  });
+
+  it.each([
+    [{ country: 'usa' }, 'invalid_country'],
+    [{ link_template: 'https://shop.example.com/products' }, 'invalid_link'],
+  ])('refuses %j before it writes anything', async (change, code) => {
+    const { ctx, swell, collections, google } = setup();
+    const error = await check(ctx, { ...CHECK(), ...change }).catch((e) => e);
+    expect(error).toMatchObject({ code });
+    expect(swell.post).not.toHaveBeenCalled();
+    expect(swell.put).not.toHaveBeenCalled();
+    expect(collections['/connections']).toHaveLength(0);
+    expect(google.requests).toHaveLength(0);
+  });
+
+  it("forgets another account's data sources when it connects to a new one", async () => {
+    const { ctx, swell } = setup();
+    await connect(ctx);
+    const [market] = await loadMarkets(swell);
+    await swell.put(`/markets/${market.id}`, { data_source: 'accounts/123/dataSources/1' });
+    forget(swell);
+    expect((await check(later(ctx), { ...CHECK(), merchant_id: '456' })).report.ok).toBe(true);
+    expect((await loadMarkets(swell))[0].data_source).toBeNull();
+    const success = batchesOf(swell).at(-1)!;
+    expect(success.map((op) => `${op.method} ${op.url.split('/')[1]}`)).toEqual(['put connections', 'put markets']);
+  });
+
+  it("keeps the account's own data sources on a repeated check", async () => {
+    const { ctx, swell } = setup();
+    await connect(ctx);
+    const [market] = await loadMarkets(swell);
+    await swell.put(`/markets/${market.id}`, { data_source: 'accounts/123/dataSources/1' });
+    await check(later(ctx), CHECK());
+    expect((await loadMarkets(swell))[0].data_source).toBe('accounts/123/dataSources/1');
+  });
+
+  it('fails when Swell refuses to store the result', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { ctx, refuse } = setup();
+    await check(ctx, CHECK());
+    refuse((method, url) => (method === 'put' && url.startsWith('/connections/') ? 'Permission denied' : null));
+    await expect(check(later(ctx), CHECK())).rejects.toThrow('Permission denied');
   });
 });
 

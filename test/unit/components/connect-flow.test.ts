@@ -22,7 +22,7 @@ describe('checkThenActivate', () => {
     const { phases, checked, on } = watch();
     expect(await checkThenActivate(call, INPUT, on)).toEqual(VIEW);
     expect(call.mock.calls.map(([body]) => body)).toEqual([
-      { op: 'check', key: INPUT.key, merchant_id: '123' },
+      { op: 'check', key: INPUT.key, merchant_id: '123', country: 'US', link_template: INPUT.link_template },
       { op: 'activate', country: 'US', link_template: INPUT.link_template },
     ]);
     expect(phases).toEqual(['checking', 'activating']);

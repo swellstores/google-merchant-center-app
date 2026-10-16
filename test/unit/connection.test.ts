@@ -37,7 +37,7 @@ describe('connection route', () => {
 
   it('answers a bad request with the error code and message', async () => {
     vi.stubGlobal('fetch', createFakeGoogle().fetch);
-    const res = (await route.post(request('POST', { op: 'check', merchant_id: '123' }))) as Response;
+    const res = (await route.post(request('POST', { op: 'check', merchant_id: '123', country: 'US', link_template: 'https://x.example.com/{slug}' }))) as Response;
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: { code: 'key_required', message: expect.any(String) } });
   });
@@ -45,7 +45,8 @@ describe('connection route', () => {
   it('checks the connection, then starts syncing', async () => {
     vi.stubGlobal('fetch', createFakeGoogle().fetch);
     const store = createFakeSwell();
-    const checked = await route.post(request('POST', { op: 'check', key: keyJson, merchant_id: '123' }, ADMIN, store));
+    const market = { country: 'US', link_template: 'https://x.example.com/{slug}' };
+    const checked = await route.post(request('POST', { op: 'check', key: keyJson, merchant_id: '123', ...market }, ADMIN, store));
     expect(checked).toMatchObject({ connection: { status: 'connected' }, report: { ok: true } });
     const started = await route.post(request('POST', { op: 'activate', country: 'US', link_template: 'https://x.example.com/{slug}' }, ADMIN, store));
     expect(started).toMatchObject({ connection: { status: 'connected' }, market: { country: 'US' }, defaults: expect.any(Object) });
