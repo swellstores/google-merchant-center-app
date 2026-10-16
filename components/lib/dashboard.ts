@@ -56,7 +56,7 @@ const STATS: { key: keyof StatusCounters; label: string; tone: Tone }[] = [
 export const SEVERITIES: Record<IssueTally['severity'], { tone: Tone; label: string }> = {
   disapproved: { tone: 'bad', label: 'Disapproved' },
   demoted: { tone: 'info', label: 'Limited' },
-  info: { tone: 'neutral', label: 'Info' },
+  info: { tone: 'neutral', label: 'In review' },
 };
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;

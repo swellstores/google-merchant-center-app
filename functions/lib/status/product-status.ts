@@ -78,7 +78,8 @@ export function offerStatus(answer: OfferAnswer): OfferStatus {
   return 'pending';
 }
 
-function severityOf(google: string | undefined): StatusIssue['severity'] {
+function severityOf(google: string | undefined, resolution: string | undefined): StatusIssue['severity'] {
+  if (resolution?.toLowerCase() === 'pending_processing') return 'info';
   if (google === 'DISAPPROVED') return 'disapproved';
   if (google === 'DEMOTED') return 'demoted';
   return 'info';
@@ -107,7 +108,7 @@ export function groupIssues(answers: OfferAnswer[]): StatusIssue[] {
       continue;
     }
     for (const item of answer.status?.itemLevelIssues ?? []) {
-      add(item.code ?? 'unknown', severityOf(item.severity), answer.inputId, item.applicableCountries ?? [], {
+      add(item.code ?? 'unknown', severityOf(item.severity, item.resolution), answer.inputId, item.applicableCountries ?? [], {
         description: item.description,
         detail: item.detail,
         documentation: item.documentation,

@@ -101,7 +101,7 @@ describe('dashboardModel', () => {
     expect(issuesOf(issue('disapproved'), issue('demoted'), issue('info')).map((i) => i.severity)).toEqual([
       { tone: 'bad', label: 'Disapproved' },
       { tone: 'info', label: 'Limited' },
-      { tone: 'neutral', label: 'Info' },
+      { tone: 'neutral', label: 'In review' },
     ]);
   });
 
