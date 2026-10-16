@@ -19,12 +19,14 @@ export interface PassResult {
 
 /**
  * One page of the catalog sync, a cursor over product ids that the courier
- * advances (`newFullSyncJob` starts one). The cursor moves past the whole page unless the run
- * failed (then only over the leading done products); products that were kept
- * or never reached go to the queue, which continues them across runs. One
- * round trip after Google's answer sends the waiting writes and reads what the
- * hand-off needs along with the caller's `reads`; the hand-off waits in
- * `env.outbox`.
+ * advances (`newFullSyncJob` starts one). The cursor moves past the whole page
+ * and products that were kept or never reached go to the queue, which
+ * continues them across runs, also when some products' parts failed: one
+ * product Google keeps failing never stalls the sync. A whole batch that
+ * failed, or a refused key or quota, moves it only over the leading done
+ * products. One round trip after Google's answer sends the waiting writes and
+ * reads what the hand-off needs along with the caller's `reads`; the hand-off
+ * waits in `env.outbox`.
  */
 export async function fullSyncPass(env: DeliveryEnv, job: FullSyncJob, reads: BatchOp[] = []): Promise<PassResult> {
   const page = await env.ctx.swell.get('/products', {
@@ -50,16 +52,13 @@ export async function fullSyncPass(env: DeliveryEnv, job: FullSyncJob, reads: Ba
   let cursor = job.cursor;
   let done = job.done;
   let leftovers: WorkUnit[] = [];
-  if (report.failure) {
-    // The cursor moves only over the leading products that are done.
+  if (report.failure && !report.short) {
     for (const id of ids) {
       if (!finished.has(id)) break;
       cursor = id;
       done++;
     }
   } else {
-    // Products too big for this run go to the queue, which continues them
-    // across runs; the catalog sync never stalls on one.
     leftovers = [...report.kept, ...report.untouched];
     cursor = ids[ids.length - 1];
     done += ids.length;

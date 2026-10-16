@@ -32,6 +32,8 @@ export interface DeliveryReport {
    * answered with a rate limit or a server error
    */
   failure?: GoogleApiError;
+  /** The failure is only parts answered with a rate limit or a server error: every other unit was settled. */
+  short?: boolean;
 }
 
 /** Time a batch needs, so the run never starts one it cannot finish. */
@@ -241,6 +243,9 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[], read?: Map<st
     }
   }
   // A part was rate limited or failed on Google's side: the courier settles what it has and backs off.
-  report.failure ??= short;
+  if (!report.failure && short) {
+    report.failure = short;
+    report.short = true;
+  }
   return report;
 }

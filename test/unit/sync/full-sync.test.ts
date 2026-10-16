@@ -63,6 +63,29 @@ describe('catalog sync', () => {
     expect(pass.failure?.kind).toBe('server');
   });
 
+  it('moves past a product Google failed on and queues it (Ruling 26)', async () => {
+    const products = [product(1), product(2), product(3)];
+    const outage = { status: 500, body: { error: { message: 'Internal error encountered.' } } };
+    const { env, swell } = setup(products, { offerErrors: { [products[1].id]: outage } });
+    const pass = await fullSyncPass(env, newFullSyncJob(NOW));
+    await env.outbox.send();
+    expect(pass.failure).toMatchObject({ kind: 'server', status: 500 });
+    expect(pass.progressed).toBe(true);
+    expect(pass.job).toMatchObject({ cursor: products.map((p) => p.id).sort()[2], done: 3 });
+    expect((await takeQueue(swell, 10)).map((q) => [q.product_id, q.kind])).toEqual([[products[1].id, 'full']]);
+  });
+
+  it('keeps its place when Google refuses the key mid-page', async () => {
+    const products = [product(1), product(2), product(3)];
+    const refused = { status: 401, body: { error: { message: 'Request had invalid authentication credentials.' } } };
+    const { env, swell } = setup(products, { offerErrors: { [products[1].id]: refused } });
+    const pass = await fullSyncPass(env, newFullSyncJob(NOW));
+    await env.outbox.send();
+    expect(pass.failure?.kind).toBe('auth');
+    expect(pass.job).toMatchObject({ status: 'running', cursor: products[0].id, done: 1 });
+    expect(await takeQueue(swell, 10)).toEqual([]);
+  });
+
   it('hands products it could not finish to the queue and moves on', async () => {
     const variants = Array.from({ length: 120 }, (_, i) => ({ id: `v${i}`, name: `V${i}`, active: true }));
     const big = { ...product(1), variants: { results: variants } };
