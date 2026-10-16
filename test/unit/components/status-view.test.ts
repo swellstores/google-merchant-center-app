@@ -1,0 +1,82 @@
+import { describe, expect, it, vi } from 'vitest';
+import { callRoute } from '../../../components/lib/api';
+import { statusPanelModel, type OfferView, type ProductStatusView, type StatusIssue } from '../../../components/lib/status-view';
+
+const NOW = Date.parse('2026-10-16T12:00:00Z');
+
+const ISSUE: StatusIssue = { code: 'image_link_broken', severity: 'disapproved', description: 'Image cannot be loaded', offers: [], countries: ['US'] };
+
+function offer(patch: Partial<OfferView> = {}): OfferView {
+  return { input_id: 'online:en:US:p1', market: 'US en', variant: null, status: 'approved', issues: [], expires: null, ...patch };
+}
+
+function view(patch: Partial<ProductStatusView> = {}): ProductStatusView {
+  return { connected: true, stored: { status: 'approved', status_label: 'Approved', date_status: '2026-10-14T08:00:00Z' }, live: null, live_error: null, ...patch };
+}
+
+describe('statusPanelModel', () => {
+  it('a disconnected store shows the stored status with its date', () => {
+    const model = statusPanelModel(view({ connected: false, stored: { status: 'disapproved', status_label: 'Disapproved', status_issues: [ISSUE], date_status: '2026-10-14T08:00:00Z' } }), NOW);
+    expect(model.headline).toEqual({ tone: 'bad', text: 'Disapproved' });
+    expect(model.note).toBe('Not connected. This is the status from 2026-10-14.');
+    expect(model.issues).toEqual([ISSUE]);
+    expect(model.markets).toEqual([]);
+    expect(model.canResend).toBe(false);
+  });
+
+  it('live offers group by market with variant names', () => {
+    const model = statusPanelModel(
+      view({
+        live: {
+          checked_at: '2026-10-16T12:00:00Z',
+          more: 2,
+          offers: [
+            offer({ variant: 'Red', expires: '2026-11-15T00:00:00Z' }),
+            offer({ input_id: 'b', variant: 'Blue', status: 'disapproved', issues: [ISSUE] }),
+            offer({ input_id: 'c', market: 'DE de', variant: 'Red', status: 'pending' }),
+          ],
+        },
+      }),
+      NOW,
+    );
+    expect(model.headline).toEqual({ tone: 'bad', text: 'Disapproved' });
+    expect(model.markets.map((m) => [m.market, m.offers.map((o) => o.title)])).toEqual([
+      ['US en', ['Red', 'Blue']],
+      ['DE de', ['Red']],
+    ]);
+    expect(model.markets[0].offers[0]).toMatchObject({ tone: 'ok', text: 'Approved', expires: '2026-11-15' });
+    expect(model.markets[0].offers[1].issues).toEqual([ISSUE]);
+    expect(model.note).toBe('And 2 more offers.');
+    expect(model.issues).toEqual([]);
+    expect(model.canResend).toBe(true);
+  });
+
+  it('a hidden product says so and offers no resend', () => {
+    const model = statusPanelModel(view({ stored: { status: 'excluded', status_label: 'Hidden' } }), NOW);
+    expect(model.headline).toEqual({ tone: 'neutral', text: 'Hidden from Google' });
+    expect(model.canResend).toBe(false);
+  });
+
+  it('a live error falls back to the stored status with a note', () => {
+    const model = statusPanelModel(view({ live_error: 'Quota exceeded', stored: { status: 'approved', status_label: 'Approved', status_issues: [ISSUE], date_status: '2026-10-14T08:00:00Z' } }), NOW);
+    expect(model.note).toBe('Google did not answer: Quota exceeded. This is the status from 2026-10-14.');
+    expect(model.headline).toEqual({ tone: 'ok', text: 'Approved' });
+    expect(model.issues).toEqual([ISSUE]);
+    expect(model.markets).toEqual([]);
+    expect(model.canResend).toBe(true);
+  });
+
+  it('a product never sent reads Not sent', () => {
+    const model = statusPanelModel(view({ stored: {} }), NOW);
+    expect(model.headline).toEqual({ tone: 'neutral', text: 'Not sent' });
+    expect(model.note).toBeNull();
+  });
+});
+
+describe('callRoute with a query', () => {
+  it('keeps the query of a GET', async () => {
+    const fetchFn = vi.fn(async () => new Response('{}', { status: 200 }));
+    await callRoute(fetchFn as unknown as typeof fetch, 'product?id=abc');
+    expect(fetchFn).toHaveBeenCalledWith('/functions/google_merchant_center/product?id=abc', { method: 'GET' });
+  });
+});

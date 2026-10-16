@@ -53,7 +53,7 @@ const STATS: { key: keyof StatusCounters; label: string; tone: Tone }[] = [
   { key: 'excluded', label: 'Hidden', tone: 'neutral' },
 ];
 
-const SEVERITIES: Record<IssueTally['severity'], { tone: Tone; label: string }> = {
+export const SEVERITIES: Record<IssueTally['severity'], { tone: Tone; label: string }> = {
   disapproved: { tone: 'bad', label: 'Disapproved' },
   demoted: { tone: 'info', label: 'Limited' },
   info: { tone: 'neutral', label: 'Info' },

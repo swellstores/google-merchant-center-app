@@ -350,6 +350,7 @@ export default function GoogleConnect(props: ComponentProps) {
             <input type="checkbox" checked={removeProducts} onChange={(event) => setRemoveProducts((event.currentTarget as HTMLInputElement).checked)} />
             Also remove the products this store sent to Google
           </label>
+          <span class="gmc-muted">Google removes them within a few hours. Their statuses stay in Swell until you connect again.</span>
           {error && <Notice tone="bad">{error}</Notice>}
           <div class="gmc-actions end">
             <Button kind="secondary" onClick={() => setConfirming(false)}>

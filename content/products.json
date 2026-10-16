@@ -67,14 +67,21 @@
           "id": "google",
           "label": "Google",
           "fields": [
+            { "id": "status", "type": "component", "component": "GoogleStatus", "label": "Google status" },
             { "id": "excluded" },
             { "type": "field_row", "fields": [{ "id": "brand" }, { "id": "mpn" }] },
             { "type": "field_row", "fields": [{ "id": "condition" }, { "id": "identifier_exists" }] },
             { "id": "google_category" },
             { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] },
-            { "type": "field_row", "fields": [{ "id": "sync_state" }, { "id": "date_synced" }] },
-            { "id": "sync_reason" },
-            { "id": "sync_error" }
+            {
+              "type": "field_group",
+              "label": "Sync details",
+              "fields": [
+                { "type": "field_row", "fields": [{ "id": "sync_state" }, { "id": "date_synced" }] },
+                { "id": "sync_reason" },
+                { "id": "sync_error" }
+              ]
+            }
           ]
         }
       ]
