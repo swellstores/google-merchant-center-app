@@ -10,7 +10,7 @@ import { Budget, iso, nextNoonUtc } from '../time';
 import { alarmRead, alarmWrite, type Alarm } from './alarm';
 import { deliver, PASS_PRODUCTS, productIdsOf, productsOf, productsRead, type DeliveryEnv } from './deliver';
 import { fullSyncPass, pageRead } from './full-sync';
-import { readQuota } from './hourly';
+import { readQuota } from './quota';
 import { itemsRead, settleWrites, takeRead, unitsFromQueue, type QueueItem, type WorkUnit } from './queue';
 import { stateById, stateRead, stateWrite, type FullSyncJob, type SyncState } from './state';
 

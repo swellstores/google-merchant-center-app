@@ -7,7 +7,7 @@ import { itemRemoval, takeRead, type QueueItem } from '../sync/queue';
 import { newFullSyncJob, stateRead, stateWrite, type SyncState } from '../sync/state';
 import { Budget, iso } from '../time';
 import { runChecks, type CheckReport } from './checks';
-import { readQuota } from '../sync/hourly';
+import { readQuota } from '../sync/quota';
 import { dataSourceFor, languageOf, loadMarkets, marketsRead, ownDataSource, replaceMarket, sameMarket, type Market, type MarketInput } from './markets';
 import {
   connectionRead,

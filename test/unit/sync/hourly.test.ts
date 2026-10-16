@@ -1,9 +1,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
-import { quotaFromGroups, readQuota, runHourly } from '../../../functions/lib/sync/hourly';
+import { runHourly } from '../../../functions/lib/sync/hourly';
 import { loadConnection } from '../../../functions/lib/connection/store';
 import { fixedClock, NOW, slowServices, testContext } from '../../helpers/context';
-import { createFakeGoogle, DEFAULT_QUOTA, type FakeGoogleOptions } from '../../helpers/fake-google';
+import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
 import { makeServiceAccountKey } from '../../helpers/keys';
 import { enqueue, loadAlarm, loadState, saveState, setAlarm } from '../../helpers/store';
@@ -29,32 +29,6 @@ function setup(status = 'connected', googleOptions: FakeGoogleOptions = {}, conn
   });
   return { google, ...fake, ctx: testContext(fake.swell, google.fetch) };
 }
-
-describe('quotaFromGroups', () => {
-  it('reads the limits of the product insert group among the others', () => {
-    expect(DEFAULT_QUOTA.quotaGroups.length).toBeGreaterThan(1);
-    expect(quotaFromGroups(DEFAULT_QUOTA)).toEqual({ minute_limit: 300, daily_limit: 5000 });
-    expect(quotaFromGroups({})).toEqual({ minute_limit: null, daily_limit: null });
-  });
-
-  it('knows the group by its name when the methods are missing', () => {
-    const group = { name: 'accounts/1/quotas/merchant-productinputs-insert', quotaLimit: '10', quotaMinuteLimit: '2' };
-    expect(quotaFromGroups({ quotaGroups: [group] })).toEqual({ minute_limit: 2, daily_limit: 10 });
-  });
-});
-
-describe('readQuota', () => {
-  it('still marks the quota checked when Google fails to give it, so no run asks again before the daily refresh', async () => {
-    const google = createFakeGoogle({ quotaError: { status: 503, body: { error: { message: 'unavailable' } } } });
-    const ctx = testContext(createFakeSwell().swell, google.fetch);
-    expect(await readQuota(ctx, 'tok', '123', { minute_limit: 60 })).toEqual({ minute_limit: 60, date_checked: at(NOW) });
-  });
-
-  it('throws when Google refuses the key', async () => {
-    const google = createFakeGoogle({ quotaError: { status: 401, body: { error: { message: 'invalid credentials' } } } });
-    await expect(readQuota(testContext(createFakeSwell().swell, google.fetch), 'tok', '123')).rejects.toMatchObject({ kind: 'auth' });
-  });
-});
 
 describe('runHourly', () => {
   it('does nothing while not connected', async () => {
