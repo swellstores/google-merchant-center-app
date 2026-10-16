@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ensureDataSources, languageOf, loadMarkets, replaceMarket, type MarketInput } from '../../../functions/lib/connection/markets';
+import { dataSourceFor, ensureDataSources, languageOf, loadMarkets, ownDataSource, replaceMarket, sameMarket, type MarketInput } from '../../../functions/lib/connection/markets';
 import type { AppContext } from '../../../functions/lib/context';
 import { swellBatch } from '../../../functions/lib/swell-batch';
 import { testContext } from '../../helpers/context';
@@ -19,9 +19,10 @@ describe('languageOf', () => {
   });
 });
 
-/** Plans the replacement and sends its writes; resolves with the market's answer. */
+/** Plans the replacement, keeping the market's own data source as activate does, and sends its writes. */
 async function replace(ctx: AppContext, next: MarketInput) {
-  const writes = await replaceMarket(ctx, 'tok', '123', await loadMarkets(ctx.swell), next);
+  const markets = await loadMarkets(ctx.swell);
+  const writes = await replaceMarket(ctx, 'tok', '123', markets, next, ownDataSource(sameMarket(markets, next), '123'));
   return (await swellBatch(ctx.swell, writes)).at(-1);
 }
 
@@ -54,6 +55,16 @@ describe('replaceMarket', () => {
     expect(await replace(ctx, { ...US, country: 'GB', currency: 'GBP' })).toMatchObject({ country: 'GB', data_source: null });
     expect(google.dataSources.has(first.data_source!)).toBe(false);
     expect((await loadMarkets(swell)).map((m) => m.country)).toEqual(['GB']);
+  });
+});
+
+describe('dataSourceFor', () => {
+  it("adopts the app's data source in Google, or creates one", async () => {
+    const google = createFakeGoogle();
+    const ctx = testContext(createFakeSwell().swell, google.fetch);
+    expect(await dataSourceFor(ctx, 'tok', '123', US)).toBe('accounts/123/dataSources/1');
+    expect(await dataSourceFor(ctx, 'tok', '123', US)).toBe('accounts/123/dataSources/1');
+    expect(google.requests.filter((r) => r.method === 'POST')).toHaveLength(1);
   });
 });
 

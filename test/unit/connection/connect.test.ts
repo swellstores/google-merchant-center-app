@@ -186,9 +186,69 @@ describe('activate', () => {
     expect(batchesOf(swell)).toHaveLength(2);
     expect(roundTrips(swell)).toBe(3);
     expect(view.connection).toMatchObject({ status: 'connected', merchant_id: '123' });
-    expect(view.market).toMatchObject({ country: 'US', language: 'en', currency: 'USD', link_template: MARKET.link_template, data_source: null });
+    expect(view.market).toMatchObject({ country: 'US', language: 'en', currency: 'USD', link_template: MARKET.link_template, data_source: 'accounts/123/dataSources/1' });
     expect((await loadState(swell)).full_sync).toEqual({ status: 'running', cursor: null, total: 0, done: 0, date_started: at(NOW + 60_000), date_finished: null });
     expect((await loadAlarm(swell)).wake_at).toBe(at(NOW + 60_000));
+  });
+
+  it('creates the data source and reads the quota before its one write', async () => {
+    const { ctx, swell, google } = setup();
+    await check(ctx, CHECK());
+    google.requests.length = 0;
+    forget(swell);
+    await activate(later(ctx), MARKET);
+    expect(google.requests.map((r) => `${r.method} ${r.path.split('?')[0]}`).sort()).toEqual([
+      'GET /datasources/v1/accounts/123/dataSources',
+      'GET /quota/v1/accounts/123/quotas',
+      'POST /datasources/v1/accounts/123/dataSources',
+    ]);
+    const write = batchesOf(swell).at(-1)!;
+    expect(write.find((op) => op.url === '/markets')?.data).toMatchObject({ data_source: 'accounts/123/dataSources/1' });
+    expect(write.find((op) => op.url === '/sync-states')?.data).toMatchObject({ quota: { minute_limit: 300, daily_limit: 5000, date_checked: at(NOW + 60_000) } });
+    expect(await loadState(swell)).toMatchObject({ quota: { minute_limit: 300 }, full_sync: { status: 'running' } });
+  });
+
+  it("adopts the app's data source an earlier connection left in Google", async () => {
+    const { ctx, swell, google } = setup();
+    google.addDataSource({ name: 'accounts/123/dataSources/9', displayName: 'Swell — US en', primaryProductDataSource: { feedLabel: 'US', contentLanguage: 'en' } });
+    await connect(ctx);
+    expect((await loadMarkets(swell))[0].data_source).toBe('accounts/123/dataSources/9');
+    expect(google.requests.some((r) => r.method === 'POST' && r.path.startsWith('/datasources'))).toBe(false);
+  });
+
+  it('asks Google nothing more when the market and its data source stay', async () => {
+    const { ctx, google } = setup();
+    await connect(ctx);
+    google.requests.length = 0;
+    await connect(later(ctx));
+    expect(google.requests.filter((r) => r.path.startsWith('/datasources') || r.path.startsWith('/quota'))).toEqual([]);
+  });
+
+  it('stays under 6 s at 1.2 s a Swell round trip and 1 s a Google call, a country change included', async () => {
+    const { ctx, swell, google } = setup();
+    await connect(ctx);
+    const slow = slowServices(swell, google.fetch, { swellMs: 1200, googleMs: 1000 }, NOW + 60_000);
+    await activate(testContext(slow.swell, slow.fetch, slow.now), { ...MARKET, country: 'GB' });
+    // Reads 1.2 s, list ‖ quota 1 s, create 1 s, the old data source 1 s, the write 1.2 s.
+    expect(slow.now() - (NOW + 60_000)).toBe(5400);
+    expect((await loadMarkets(swell)).map((m) => [m.country, m.data_source])).toEqual([['GB', 'accounts/123/dataSources/2']]);
+  });
+
+  it.each([
+    ['dataSourceError', { status: 403, body: { error: { message: 'The caller does not have permission' } } }, /data source.*The caller does not have permission/],
+    ['quotaError', { status: 401, body: { error: { message: 'Request had invalid authentication credentials.' } } }, /quota.*invalid authentication credentials/],
+  ])('fails with a clear message and writes nothing when Google refuses (%s)', async (option, reply, message) => {
+    const { ctx, swell, collections } = setup();
+    await check(ctx, CHECK());
+    const refusing = createFakeGoogle({ [option]: reply });
+    forget(swell);
+    const error = await activate(testContext(swell, refusing.fetch), MARKET).catch((e) => e);
+    expect(error).toBeInstanceOf(AppError);
+    expect(error.message).toMatch(message);
+    expect(error.status).toBe(502);
+    expect(batchesOf(swell)).toHaveLength(1);
+    expect(collections['/markets']).toHaveLength(0);
+    expect(collections['/sync-states']).toHaveLength(0);
   });
 
   it('creates the state of a fresh store with the job as a plain object', async () => {
@@ -199,6 +259,7 @@ describe('activate', () => {
     expect(batchesOf(swell).flat().find((op) => op.method === 'post' && op.url === '/sync-states')?.data).toEqual({
       backoff: 0,
       full_sync: { status: 'running', cursor: null, total: 0, done: 0, date_started: at(NOW), date_finished: null },
+      quota: { minute_limit: 300, daily_limit: 5000, date_checked: at(NOW) },
     });
   });
 
@@ -283,7 +344,7 @@ describe('activate', () => {
     expect((await check(testContext(fake.swell, failing.fetch), CHECK())).report.ok).toBe(false);
     const working = createFakeGoogle();
     expect(await connect(testContext(fake.swell, working.fetch))).not.toBeNull();
-    expect((await loadMarkets(fake.swell))[0].data_source).toBeNull();
+    expect((await loadMarkets(fake.swell))[0].data_source).toBe('accounts/123/dataSources/1');
     expect(working.requests.filter((r) => r.method === 'DELETE')).toHaveLength(0);
   });
 
@@ -294,8 +355,8 @@ describe('activate', () => {
     await swell.put(`/markets/${us.id}`, { data_source: 'accounts/123/dataSources/1' });
     google.dataSources.add('accounts/123/dataSources/1');
     const view = await connect(later(ctx), { ...MARKET, country: 'GB' });
-    expect(view?.market).toMatchObject({ country: 'GB', data_source: null });
-    expect(google.dataSources.size).toBe(0);
+    expect(view?.market).toMatchObject({ country: 'GB', data_source: 'accounts/123/dataSources/2' });
+    expect([...google.dataSources]).toEqual(['accounts/123/dataSources/2']);
     expect((await loadMarkets(swell)).map((m) => m.country)).toEqual(['GB']);
   });
 
@@ -365,7 +426,7 @@ describe('disconnect', () => {
     const slow = slowServices(swell, google.fetch, { swellMs: 1200, googleMs: 1000 });
     await disconnect(testContext(slow.swell, slow.fetch, slow.now), false);
     const batches = batchesOf(swell);
-    expect(batches[1].map((op) => op.method)).toEqual(['put', 'put', 'put']);
+    expect(batches[1].map((op) => `${op.method} ${op.url.split('/')[1]}`)).toEqual(['put connections', 'put sync-states', 'put alarms', 'put markets']);
     expect(Math.max(...batches.filter((batch) => batch[0].method === 'delete').map((batch) => batch.length))).toBeLessThanOrEqual(50);
     // Read 1.2 s, the critical writes 2.4 s, then deletes while one more fits before 7 s.
     expect(slow.now() - NOW).toBe(6000);

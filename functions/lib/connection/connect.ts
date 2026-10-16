@@ -7,7 +7,8 @@ import { itemRemoval, takeRead, type QueueItem } from '../sync/queue';
 import { newFullSyncJob, stateRead, stateWrite, type SyncState } from '../sync/state';
 import { Budget, iso } from '../time';
 import { runChecks, type CheckReport } from './checks';
-import { languageOf, loadMarkets, marketsRead, replaceMarket, type Market, type MarketInput } from './markets';
+import { readQuota } from '../sync/hourly';
+import { dataSourceFor, languageOf, loadMarkets, marketsRead, ownDataSource, replaceMarket, sameMarket, type Market, type MarketInput } from './markets';
 import {
   connectionRead,
   connectionWrite,
@@ -128,11 +129,23 @@ export async function check(ctx: AppContext, input: CheckInput): Promise<{ conne
   return { connection: publicConnection(recordOf<Connection>(results[0], 'the connection')), report };
 }
 
+/** A Google refusal while setting up fails the route with what it was about. */
+async function inGoogle<T>(what: string, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (!(error instanceof GoogleApiError)) throw error;
+    throw new AppError(`google_${error.kind}`, `Google could not ${what}: ${error.message}`, 502);
+  }
+}
+
 /**
  * Creates or replaces the market of a connected store and starts sending the
  * catalog unless nothing it depends on changed: a new market, a catalog sync
  * that never ran or is older than the connection. Otherwise it only wakes the
- * courier for work that waits.
+ * courier for work that waits. Google comes first (the market's data source,
+ * the quota, the old country's data source), then one batch writes it all:
+ * a refusal leaves the store as it was.
  */
 export async function activate(ctx: AppContext, input: ActivateInput): Promise<StatusView> {
   validateMarket(input);
@@ -155,17 +168,24 @@ export async function activate(ctx: AppContext, input: ActivateInput): Promise<S
     currency: details?.currency ?? 'USD',
     link_template: input.link_template,
   };
-  const previous = markets.find((m) => m.country === next.country && m.language === next.language);
+  const accountId = connection.merchant_id;
+  const previous = sameMarket(markets, next);
   const marketChanged = !previous || previous.currency !== next.currency || previous.link_template !== next.link_template;
   const job = state?.full_sync;
   const restart = marketChanged || !job || Date.parse(job.date_started) < Date.parse(connection.date_connected ?? '');
 
   const writes: BatchOp[] = [];
-  const token = await accessTokenFor(ctx, connection, (patch) => writes.push(connectionWrite(connection.id, patch)));
-  writes.push(...(await replaceMarket(ctx, token, connection.merchant_id, markets, next)));
+  const token = await inGoogle('accept the key', () => accessTokenFor(ctx, connection, (patch) => writes.push(connectionWrite(connection.id, patch))));
+  const kept = ownDataSource(previous, accountId);
+  const [dataSource, quota] = await Promise.all([
+    kept ?? inGoogle('create the data source for your products', () => dataSourceFor(ctx, token, accountId, next)),
+    restart || !state?.quota?.date_checked ? inGoogle('read the quota of the account', () => readQuota(ctx, token, accountId, state?.quota)) : null,
+  ]);
+  writes.push(...(await inGoogle('remove the products of the old country', () => replaceMarket(ctx, token, accountId, markets, next, dataSource))));
   const marketAt = writes.length - 1;
   const now = ctx.now();
-  if (restart) writes.push(stateWrite(state?.id, { full_sync: { $set: newFullSyncJob(now) } }));
+  const statePatch = { ...(restart ? { full_sync: { $set: newFullSyncJob(now) } } : {}), ...(quota ? { quota: { $set: quota } } : {}) };
+  if (Object.keys(statePatch).length) writes.push(stateWrite(state?.id, statePatch));
   const wake = restart || queued || job?.status === 'running' ? alarmWrite(alarm, now) : null;
   if (wake) writes.push(wake);
   const results = await swellBatch(ctx.swell, writes);

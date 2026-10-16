@@ -16,6 +16,10 @@ export interface FakeGoogleOptions {
   /** Per-offer answer for insert, patch and delete */
   offerErrors?: Record<string, Reply>;
   quota?: Json;
+  /** Replaces the answer to creating a data source, e.g. a 403 */
+  dataSourceError?: Reply;
+  /** Replaces the quota answer, e.g. a 401 */
+  quotaError?: Reply;
 }
 
 /** The shape Google answers with (spike 3): one group per method, the insert group among them. */
@@ -102,6 +106,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}) {
       return options.account ?? { status: 200, body: { name: `accounts/${m[1]}`, accountName: 'Demo Shop' } };
     }
     if ((m = path.match(/^\/datasources\/v1\/accounts\/(\d+)\/dataSources$/)) && method === 'POST') {
+      if (options.dataSourceError) return options.dataSourceError;
       const name = `accounts/${m[1]}/dataSources/${++dataSourceSeq}`;
       dataSources.add(name);
       dataSourceBodies.set(name, { ...body, name });
@@ -116,7 +121,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}) {
       for (const key of [...inputs.keys()]) if (key.startsWith(`${m[1]}|`)) inputs.delete(key);
       return { status: 200, body: {} };
     }
-    if (path.match(/^\/quota\/v1\/accounts\/\d+\/quotas$/)) return { status: 200, body: options.quota ?? DEFAULT_QUOTA };
+    if (path.match(/^\/quota\/v1\/accounts\/\d+\/quotas$/)) return options.quotaError ?? { status: 200, body: options.quota ?? DEFAULT_QUOTA };
     if (path.match(/^\/products\/v1\/accounts\/\d+\/productInputs:insert$/) && method === 'POST') {
       const failure = options.offerErrors?.[body.offerId];
       if (failure) return failure;

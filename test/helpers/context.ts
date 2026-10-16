@@ -21,15 +21,18 @@ export function testContext(swell: SwellClient, fetchFn: typeof fetch = unexpect
 
 /**
  * Swell and Google that take the given time per round trip, on a clock that
- * moves only then: a run's fake duration is its round trips.
+ * moves only then: a run's fake duration is its round trips. Calls made at
+ * the same time overlap, as concurrent requests do.
  */
 export function slowServices(swell: SwellClient, fetchFn: typeof fetch, latency: { swellMs: number; googleMs: number }, start = NOW) {
   let t = start;
   const after =
     <A extends unknown[], R>(ms: number, call: (...args: A) => Promise<R>) =>
     async (...args: A): Promise<R> => {
-      t += ms;
-      return call(...args);
+      const end = t + ms;
+      const result = await call(...args);
+      t = Math.max(t, end);
+      return result;
     };
   return {
     now: () => t,

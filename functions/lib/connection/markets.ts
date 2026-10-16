@@ -35,27 +35,40 @@ async function dropDataSource(ctx: AppContext, token: string, name: string): Pro
   }
 }
 
+/** Data source names carry their account: another account's are stale. */
+export const ownDataSource = (market: Market | undefined, accountId: string) =>
+  market?.data_source?.startsWith(`accounts/${accountId}/`) ? market.data_source : null;
+
+/** The market `next` would replace or keep: phase 1 keeps one per country and language. */
+export const sameMarket = (markets: Market[], next: MarketInput) => markets.find((m) => m.country === next.country && m.language === next.language);
+
 /**
- * The writes that make `next` the one market (phase 1 keeps one); the last
- * one is the market's. The same country and language keep their data source;
- * any other market goes, with its data source and its products in Google.
- * Data source names carry their account: another account's are only forgotten.
+ * The writes that make `next` the one market (phase 1 keeps one), with
+ * `dataSource`; the last write is the market's. Any other market goes, with
+ * its data source and its products in Google; another account's data
+ * sources are only forgotten.
  */
-export async function replaceMarket(ctx: AppContext, token: string, accountId: string, markets: Market[], next: MarketInput): Promise<BatchOp[]> {
-  const ours = (market: Market) => Boolean(market.data_source?.startsWith(`accounts/${accountId}/`));
-  const same = markets.find((m) => m.country === next.country && m.language === next.language);
+export async function replaceMarket(
+  ctx: AppContext,
+  token: string,
+  accountId: string,
+  markets: Market[],
+  next: MarketInput,
+  dataSource: string | null,
+): Promise<BatchOp[]> {
+  const same = sameMarket(markets, next);
   const writes: BatchOp[] = [];
   for (const market of markets) {
     if (market === same) continue;
-    if (ours(market)) await dropDataSource(ctx, token, market.data_source!);
+    const own = ownDataSource(market, accountId);
+    if (own) await dropDataSource(ctx, token, own);
     writes.push({ method: 'delete', url: `${COLLECTION}/${market.id}` });
   }
-  if (!same) {
-    writes.push({ method: 'post', url: COLLECTION, data: { ...next, data_source: null } });
-  } else {
-    const stale = same.data_source && !ours(same) ? { data_source: null } : {};
-    writes.push({ method: 'put', url: `${COLLECTION}/${same.id}`, data: { currency: next.currency, link_template: next.link_template, ...stale } });
-  }
+  writes.push(
+    same
+      ? { method: 'put', url: `${COLLECTION}/${same.id}`, data: { currency: next.currency, link_template: next.link_template, data_source: dataSource } }
+      : { method: 'post', url: COLLECTION, data: { ...next, data_source: dataSource } },
+  );
   return writes;
 }
 
@@ -66,7 +79,7 @@ interface GoogleDataSource {
 }
 
 /** The app's own data source for a market, left in Google by an earlier connection. */
-function findOwn(list: GoogleDataSource[], market: Market): GoogleDataSource | undefined {
+function findOwn(list: GoogleDataSource[], market: MarketInput): GoogleDataSource | undefined {
   return list.find(
     (ds) =>
       ds.displayName === dataSourceName(market) &&
@@ -75,9 +88,16 @@ function findOwn(list: GoogleDataSource[], market: Market): GoogleDataSource | u
   );
 }
 
+/** The app's data source for a market in Google: the one an earlier connection left, or a new one. */
+export async function dataSourceFor(ctx: AppContext, token: string, accountId: string, market: MarketInput): Promise<string> {
+  const list = (await googleCall<{ dataSources?: GoogleDataSource[] }>(ctx.fetch, token, listDataSources(accountId))).dataSources ?? [];
+  return findOwn(list, market)?.name ?? (await googleCall<{ name: string }>(ctx.fetch, token, createDataSource(accountId, market))).name;
+}
+
 /**
  * Every market gets its own API data source before the first product is sent
  * there: the app's existing one when Google has it, otherwise a new one.
+ * `activate` sets them up; this is the courier's fallback.
  */
 export async function ensureDataSources(ctx: AppContext, token: string, accountId: string, markets: Market[]): Promise<Market[]> {
   const ready: Market[] = [];
