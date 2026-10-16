@@ -28,6 +28,14 @@ describe('enqueue function', () => {
     expect(collections['/queue-items']).toHaveLength(0);
   });
 
+  it('ignores its own writes when the event shows an operator in the app’s fields', async () => {
+    const { swell, collections } = createFakeSwell({ connection: { status: 'connected', merchant_id: '123' } });
+    const data = { $app: { google_merchant_center: { sync_state: 'sent', $set: { input_ids: ['en~US~p1'] } } } };
+    await enqueueFunction(request(swell, { id: 'p1', $event: { type: 'product.updated', data } }));
+    expect(collections['/queue-items']).toHaveLength(0);
+    expect(roundTrips(swell)).toBe(0);
+  });
+
   it('reads in one round trip and writes in one', async () => {
     const { swell, collections } = createFakeSwell({ connection: { status: 'connected', merchant_id: '123' } });
     await enqueueFunction(request(swell, { id: 'p1', $event: { type: 'product.created', data: { id: 'p1' } } }));

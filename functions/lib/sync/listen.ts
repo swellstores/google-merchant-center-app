@@ -38,7 +38,8 @@ export function planFromEvent(
 
   const relevant = isVariant ? VARIANT_FIELDS : PRODUCT_FIELDS;
   const fields = Object.keys(record).filter((key) => relevant.has(key));
-  const ownFields = Object.keys(record.$app?.[appId] ?? {}).filter((key) => !SYSTEM_FIELDS.has(key));
+  // An operator (`$set`) is part of a write, not a field the merchant changed.
+  const ownFields = Object.keys(record.$app?.[appId] ?? {}).filter((key) => !SYSTEM_FIELDS.has(key) && !key.startsWith('$'));
   if (!fields.length && !ownFields.length) return null;
   const light = !ownFields.length && fields.every((key) => LIGHT_FIELDS.has(key));
   return { productId, kind: light ? 'light' : 'full' };
