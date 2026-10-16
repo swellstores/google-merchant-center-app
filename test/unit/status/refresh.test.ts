@@ -9,6 +9,7 @@ import {
   type ProductStatus,
 } from '../../../functions/lib/status/product-status';
 import {
+  MAX_TALLIES,
   newStatusRefreshJob,
   STATUS_PAGE,
   statusPageRead,
@@ -367,6 +368,23 @@ describe('status refresh pass', () => {
       },
       { code: 'missing_gtin', severity: 'demoted', description: 'missing_gtin text', products: 1, samples: [{ id: idOf(5), name: 'P5' }] },
     ]);
+  });
+
+  it('a disapproved code seen after 30 info codes reaches the tally', async () => {
+    const infos: IssueTally[] = Array.from({ length: MAX_TALLIES }, (_, i) => ({
+      code: `info_${i}`, severity: 'info', description: 'i', products: i === 7 ? 1 : 2, samples: [],
+    }));
+    const lateInfo = { ...approved(), itemLevelIssues: [{ code: 'late_info', severity: 'NOT_IMPACTED', description: 'late' }] };
+    const { env } = setup([product(1), product(2)], { statuses: { [offerOf(1)]: disapproved('image_too_small'), [offerOf(2)]: lateInfo } });
+    const pass = await statusRefreshPass(env, { ...newStatusRefreshJob(NOW), issues: infos });
+    const codes = pass.job.issues.map((tally) => tally.code);
+    expect(codes).toHaveLength(MAX_TALLIES);
+    expect(codes).not.toContain('info_7');
+    expect(codes).not.toContain('late_info');
+    expect(pass.job.issues).toContainEqual({
+      code: 'image_too_small', severity: 'disapproved', description: 'image_too_small text', products: 1, samples: [{ id: idOf(1), name: 'P1' }],
+    });
+    expect(summaryOf(pass.job).top_issues[0].code).toBe('image_too_small');
   });
 
   it('a pass is two Swell round trips and one Google call', async () => {

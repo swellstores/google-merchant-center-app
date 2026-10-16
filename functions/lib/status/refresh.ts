@@ -134,14 +134,26 @@ function resendDue(offers: OfferAnswer[], fields: GoogleFields, now: number): bo
   return offers.every((offer) => !offer.found) && !justSent(fields, now);
 }
 
+/** More severe, or as severe with more products. */
+const outranks = (a: Pick<IssueTally, 'severity' | 'products'>, b: Pick<IssueTally, 'severity' | 'products'>) =>
+  SEVERITY_ORDER[a.severity] < SEVERITY_ORDER[b.severity] || (a.severity === b.severity && a.products > b.products);
+
+/** Where a new code goes: a free place, or the place of the least important tally when the new code outranks it; -1 for none. */
+function placeFor(tallies: IssueTally[], issue: StatusIssue): number {
+  if (tallies.length < MAX_TALLIES) return tallies.length;
+  const weakest = tallies.reduce((at, t, i) => (outranks(tallies[at], t) ? i : at), 0);
+  return outranks({ severity: issue.severity, products: 1 }, tallies[weakest]) ? weakest : -1;
+}
+
 function tally(tallies: IssueTally[], product: SwellProduct, issues: StatusIssue[]): void {
   for (const issue of issues) {
     let entry = tallies.find((t) => t.code === issue.code);
     if (!entry) {
-      if (tallies.length >= MAX_TALLIES) continue;
+      const at = placeFor(tallies, issue);
+      if (at < 0) continue;
       entry = { code: issue.code, severity: issue.severity, description: issue.description, products: 0, samples: [] };
       if (issue.documentation) entry.documentation = issue.documentation;
-      tallies.push(entry);
+      tallies[at] = entry;
     }
     if (SEVERITY_ORDER[issue.severity] < SEVERITY_ORDER[entry.severity]) entry.severity = issue.severity;
     entry.products++;
