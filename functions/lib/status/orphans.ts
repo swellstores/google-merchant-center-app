@@ -20,6 +20,8 @@ export interface OrphanScanJob {
 }
 
 export const ORPHAN_PAGE = 250;
+/** Products read per pass at most: they are read whole, and a page can name 250. */
+export const ORPHAN_PRODUCTS = 50;
 /** Writes per pass at most: with the caller's reads they fit one server wave of `/:batch`. */
 export const ORPHAN_WRITES = 8;
 
@@ -58,8 +60,9 @@ const productsRead = (ids: string[]): BatchOp => ({ method: 'get', url: '/produc
 /**
  * One Google page of the orphan scan: offers of the markets' data sources
  * whose product is gone from Swell, or no longer lists them, are queued so the
- * courier deletes them. A page is handled `ORPHAN_WRITES` products at a time;
- * the job keeps its page token and counts the offers done in `skip`.
+ * courier deletes them. A pass reads at most `ORPHAN_PRODUCTS` products and
+ * queues at most `ORPHAN_WRITES`; the job keeps its page token and counts the
+ * offers done in `skip`, so the next pass lists the same page again.
  *
  * Google sorts offers by name, so the offers of one product can be apart; one
  * of them past the stop is handled again by the next pass.
@@ -82,12 +85,21 @@ export async function orphanScanPass(env: DeliveryEnv, job: OrphanScanJob, reads
   const sources = new Set(env.markets.map((market) => market.data_source));
   const offers = (page.products ?? []).slice(job.skip).map((listed, index) => ({ listed, index }));
   const groups = new Map<string, Group>();
+  /** Where the first product past `ORPHAN_PRODUCTS` begins: the pass stops there */
+  let unread: number | null = null;
   for (const { listed, index } of offers) {
     if (!sources.has(listed.dataSource)) continue;
     const productId = listed.productAttributes?.itemGroupId ?? listed.offerId;
-    const group = groups.get(productId) ?? { productId, inputIds: [], first: index };
+    let group = groups.get(productId);
+    if (!group) {
+      if (groups.size >= ORPHAN_PRODUCTS) {
+        unread = index;
+        break;
+      }
+      group = { productId, inputIds: [], first: index };
+      groups.set(productId, group);
+    }
     group.inputIds.push(productInputId(listed));
-    groups.set(productId, group);
   }
 
   const appId = env.ctx.appId;
@@ -95,6 +107,8 @@ export async function orphanScanPass(env: DeliveryEnv, job: OrphanScanJob, reads
   if (groups.size) {
     const answer = (await env.outbox.send([productsRead([...groups.keys()])]))[0];
     for (const product of listOf<SwellProduct>(answer, 'the products listed in Google')) found.set(product.id, product);
+    // The writes and the run's end still need their round trips; Google is done.
+    if (!env.budget.allows(2, 0)) return unchanged;
   }
 
   const next = structuredClone(job);
@@ -115,8 +129,9 @@ export async function orphanScanPass(env: DeliveryEnv, job: OrphanScanJob, reads
     next.found += orphans.length;
   }
 
-  if (stoppedAt !== null) {
-    next.skip += stoppedAt;
+  const stop = stoppedAt ?? unread;
+  if (stop !== null) {
+    next.skip += stop;
   } else {
     next.skip = 0;
     if (page.nextPageToken) next.page_token = page.nextPageToken;

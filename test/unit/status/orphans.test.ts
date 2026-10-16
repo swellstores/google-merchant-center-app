@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Market } from '../../../functions/lib/connection/markets';
-import { newOrphanScanJob, ORPHAN_PAGE, ORPHAN_WRITES, orphanScanPass, type OrphanScanJob } from '../../../functions/lib/status/orphans';
+import { measured } from '../../../functions/lib/context';
+import { newOrphanScanJob, ORPHAN_PAGE, ORPHAN_PRODUCTS, ORPHAN_WRITES, orphanScanPass, type OrphanScanJob } from '../../../functions/lib/status/orphans';
 import { Outbox } from '../../../functions/lib/swell-batch';
 import type { DeliveryEnv } from '../../../functions/lib/sync/deliver';
 import { stateById } from '../../../functions/lib/sync/state';
 import { Budget, iso } from '../../../functions/lib/time';
-import { APP_ID, fixedClock, NOW, testContext } from '../../helpers/context';
+import { APP_ID, fixedClock, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
 import { takeQueue } from '../../helpers/store';
@@ -164,6 +165,37 @@ describe('orphan scan pass', () => {
     expect(first[1].data).toEqual({ where: { id: { $in: [idOf(1)] } }, limit: 1 });
     expect(first[1].data).not.toHaveProperty('fields');
     expect(second.map((op) => [op.method, op.url])).toEqual([['post', '/queue-items']]);
+  });
+
+  it('an orphan pass reads at most 50 products', async () => {
+    const products = Array.from({ length: 60 }, (_, i) => product(i + 1, [offerOf(i + 1)]));
+    const { env, swell } = setup(products, { strays: products.map((_, i) => stray(i + 1)) });
+    const productReads = () =>
+      batchesOf(swell)
+        .flat()
+        .filter((op) => op.method === 'get' && op.url === '/products')
+        .map((op) => (op.data as { where: { id: { $in: string[] } } }).where.id.$in);
+    const first = await orphanScanPass(env, newOrphanScanJob(NOW));
+    expect(productReads().map((ids) => ids.length)).toEqual([ORPHAN_PRODUCTS]);
+    expect(first.job).toMatchObject({ status: 'running', page_token: null, skip: ORPHAN_PRODUCTS, found: 0 });
+    expect(first.progressed).toBe(true);
+    const second = await orphanScanPass(env, first.job);
+    expect(productReads()[1]).toEqual(products.slice(ORPHAN_PRODUCTS).map((p) => p.id));
+    expect(second.job).toMatchObject({ status: 'done', skip: 0, found: 0 });
+  });
+
+  it('an orphan pass without time after its read writes nothing', async () => {
+    const google = createFakeGoogle({ strays: [stray(1), stray(2)] });
+    const fake = createFakeSwell({ products: [] });
+    const slow = slowServices(fake.swell, google.fetch, { swellMs: 1300, googleMs: 1500 });
+    // Time for the list (1.5 s) and the product read (1.3 s), not for the two round trips after them.
+    const budget = new Budget(slow.now, 5000);
+    const ctx = measured(testContext(slow.swell, slow.fetch, slow.now), budget);
+    const env: DeliveryEnv = { ctx, accountId: '1', token: 't', markets: [MARKET], defaults: { condition: 'new' }, budget, outbox: new Outbox(ctx.swell) };
+    const job = newOrphanScanJob(NOW);
+    expect(await orphanScanPass(env, job, [stateById('s1')])).toEqual({ job, sentOps: 0, progressed: false, answers: [] });
+    expect(batchesOf(fake.swell).map((batch) => batch.map((op) => op.method))).toEqual([['get']]);
+    expect(await takeQueue(fake.swell, 10)).toEqual([]);
   });
 
   it('leaves the job without a round trip when there is no time for the page', async () => {
