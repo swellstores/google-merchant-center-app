@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
 import { COUNTRIES } from './lib/countries';
 import { summarizeKey } from './lib/key-file';
-import { Button, Checklist, inputStyle, Label, Modal, Notice, Stack, theme } from './lib/ui';
+import { type CheckResult as Check, stepStates } from './lib/steps';
+import { Button, Card, ExternalLink, Label, Modal, Notice, Pill, Root, Step } from './lib/ui';
 
 export const config = { description: 'Connect the store to Google Merchant Center with a service account key' };
 
@@ -30,13 +31,6 @@ interface StatusView {
   defaults: { link_template: string };
 }
 
-interface Check {
-  id: string;
-  ok: boolean;
-  message: string;
-  help?: string;
-}
-
 interface ConnectResult {
   connection: ConnectionView;
   market: MarketView | null;
@@ -46,13 +40,7 @@ interface ConnectResult {
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const countryName = (code: string) => COUNTRIES.find(([c]) => c === code)?.[1] ?? code;
 
-const STEPS = [
-  { text: 'Create a Google Cloud project.', href: 'https://console.cloud.google.com/projectcreate' },
-  { text: 'Enable the Merchant API in that project.', href: 'https://console.cloud.google.com/apis/library/merchantapi.googleapis.com' },
-  { text: 'Create a service account, open it, and add a JSON key under Keys.', href: 'https://console.cloud.google.com/iam-admin/serviceaccounts' },
-  { text: 'Drop the key file below and enter your Merchant Center account ID.' },
-  { text: 'In Merchant Center, open Settings → People and access and add the service account email as an Admin.', href: 'https://merchants.google.com/' },
-];
+const value = (event: Event) => (event.currentTarget as HTMLInputElement).value;
 
 export default function GoogleConnect(props: ComponentProps) {
   const [view, setView] = useState<StatusView | null>(null);
@@ -63,6 +51,8 @@ export default function GoogleConnect(props: ComponentProps) {
   const [country, setCountry] = useState('US');
   const [linkTemplate, setLinkTemplate] = useState('');
   const [checks, setChecks] = useState<Check[]>([]);
+  const [allOk, setAllOk] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [changingCountry, setChangingCountry] = useState(false);
   const [removeProducts, setRemoveProducts] = useState(true);
@@ -97,6 +87,7 @@ export default function GoogleConnect(props: ComponentProps) {
         link_template: linkTemplate.trim(),
       });
       setChecks(result.report.checks);
+      setAllOk(result.report.ok);
       setView((current) => current && { ...current, connection: result.connection, market: result.market });
       if (result.report.ok) setKeyText('');
     } catch (e) {
@@ -123,6 +114,7 @@ export default function GoogleConnect(props: ComponentProps) {
       const next = await callRoute<StatusView>(props.fetch, 'connection', { op: 'disconnect', remove_products: removeProducts });
       setView(next);
       setChecks([]);
+      setAllOk(false);
       setConfirming(false);
     } catch (e) {
       setError(messageOf(e));
@@ -140,125 +132,209 @@ export default function GoogleConnect(props: ComponentProps) {
     }
   }
 
-  async function readFile(event: Event) {
-    const input = event.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
+  async function readKeyFile(file: File | undefined) {
     if (!file) return;
     try {
       setKeyText(await file.text());
     } catch (e) {
       setError(messageOf(e));
     }
+  }
+
+  async function chooseFile(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    await readKeyFile(input.files?.[0]);
     input.value = '';
   }
 
+  function dropFile(event: DragEvent) {
+    event.preventDefault();
+    setDragging(false);
+    readKeyFile(event.dataTransfer?.files?.[0]);
+  }
+
   if (!view) {
-    if (!error) return <Stack>Loading…</Stack>;
+    if (!error) return <Root>Loading…</Root>;
     return (
-      <Stack>
+      <Root>
         <Notice tone="bad">{error}</Notice>
         <div>
           <Button onClick={load}>Retry</Button>
         </div>
-      </Stack>
+      </Root>
     );
   }
+
   const status = view.connection.status;
+  const connected = status === 'connected';
+  const failedCheck = checks.some((check) => !check.ok);
+  const states = stepStates(checks, allOk);
+  const storedKey = !!view.connection.client_email;
 
-  return (
-    <Stack gap={16}>
-      {status === 'connected' && (
-        <Notice tone="ok">
-          Connected to Merchant Center {view?.connection.merchant_id} as {view?.connection.client_email}. Products are sent to{' '}
-          {view?.market ? `${view.market.country} (${view.market.language}, ${view.market.currency})` : 'Google'}.
-        </Notice>
-      )}
-      {status === 'broken' && (
-        <Notice tone="bad">
-          Google stopped accepting the connection: {view?.connection.last_error}. Fix it and press Check again, or paste a new key.
-        </Notice>
-      )}
-      {error && <Notice tone="bad">{error}</Notice>}
+  const guide = (
+    <div class="gmc-steps">
+      <Step number={1} title="Google Cloud project" {...states.project}>
+        <span class="gmc-muted">Create a project and enable the Merchant API in it.</span>
+        <div class="gmc-links">
+          <ExternalLink href="https://console.cloud.google.com/projectcreate">Create project</ExternalLink>
+          <ExternalLink href="https://console.cloud.google.com/apis/library/merchantapi.googleapis.com">Enable Merchant API</ExternalLink>
+        </div>
+      </Step>
 
-      {status !== 'connected' && (
-        <ol style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {STEPS.map((step) => (
-            <li key={step.text}>
-              {step.text}{' '}
-              {step.href && (
-                <a href={step.href} target="_blank" rel="noopener noreferrer" style={{ color: theme.info }}>
-                  Open
-                </a>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
-
-      <Label text="Service account key (JSON)" hint={summary && 'error' in summary ? summary.error : view?.connection.client_email ? 'Leave empty to keep the stored key.' : undefined}>
-        <input type="file" accept="application/json,.json" onChange={readFile} />
-        <textarea
-          rows={3}
-          value={keyText}
-          placeholder='{"type": "service_account", …}'
-          onInput={(event) => setKeyText((event.currentTarget as HTMLTextAreaElement).value)}
-          style={{ ...inputStyle, fontFamily: 'monospace', fontSize: 12 }}
-        />
-      </Label>
-
-      {email && (
-        <Label text="Service account email" hint="Add this address in Merchant Center → People and access, with Admin access.">
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input ref={emailRef} readOnly value={email} onFocus={(event) => (event.currentTarget as HTMLInputElement).select()} style={{ ...inputStyle, flex: 1 }} />
-            <Button kind="secondary" onClick={copyEmail}>
-              Copy
+      <Step number={2} title="Service account key" {...states.key}>
+        <span class="gmc-muted">Create a service account and add a JSON key under Keys.</span>
+        <div class="gmc-links">
+          <ExternalLink href="https://console.cloud.google.com/iam-admin/serviceaccounts">Service accounts</ExternalLink>
+        </div>
+        <label
+          class={`gmc-drop${dragging ? ' over' : ''}`}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={dropFile}
+        >
+          <input type="file" accept="application/json,.json" onChange={chooseFile} />
+          Drop the JSON key here, or click to choose a file
+        </label>
+        <details>
+          <summary>Paste the key instead</summary>
+          <textarea
+            class="gmc-input"
+            rows={3}
+            aria-label="Service account key (JSON)"
+            value={keyText}
+            placeholder='{"type": "service_account", …}'
+            onInput={(event) => setKeyText(value(event))}
+            style={{ marginTop: 8, fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12 }}
+          />
+        </details>
+        {summary && 'clientEmail' in summary && (
+          <div class="gmc-actions">
+            <Pill tone="ok">Key of {summary.clientEmail}</Pill>
+            <Button kind="text" onClick={() => setKeyText('')}>
+              Remove
             </Button>
           </div>
+        )}
+        {summary && 'error' in summary && <Notice tone="bad">{summary.error}</Notice>}
+        {!keyText && storedKey && <span class="gmc-muted">A key is stored. Leave this empty to keep it.</span>}
+      </Step>
+
+      <Step number={3} title="Merchant Center access" {...states.access}>
+        <span class="gmc-muted">
+          Verify and claim your website (Settings → Business info → Website), then add the service account in Settings → People and access with Admin access.
+        </span>
+        <div class="gmc-links">
+          <ExternalLink href="https://merchants.google.com/">Merchant Center</ExternalLink>
+        </div>
+        {email && (
+          <Label text="Service account email">
+            <div class="gmc-actions">
+              <input ref={emailRef} class="gmc-input" style={{ flex: 1, width: 'auto' }} readOnly value={email} onFocus={(event) => (event.currentTarget as HTMLInputElement).select()} />
+              <Button kind="secondary" onClick={copyEmail}>
+                Copy
+              </Button>
+            </div>
+          </Label>
+        )}
+      </Step>
+    </div>
+  );
+
+  const connectStep = (
+    <Step number={4} title={connected ? 'Connection settings' : 'Connect'} {...states.connect}>
+      <div class="gmc-grid">
+        <Label text="Merchant Center account ID">
+          <input class="gmc-input" value={merchantId} inputMode="numeric" onInput={(event) => setMerchantId(value(event))} />
         </Label>
-      )}
-
-      <div style={{ display: 'flex', gap: 12 }}>
-        <div style={{ flex: 1 }}>
-          <Label text="Merchant Center account ID">
-            <input value={merchantId} inputMode="numeric" onInput={(event) => setMerchantId((event.currentTarget as HTMLInputElement).value)} style={inputStyle} />
-          </Label>
-        </div>
-        <div style={{ flex: 1 }}>
-          <Label text="Country you sell to">
-            <select value={country} onChange={(event) => setCountry((event.currentTarget as HTMLSelectElement).value)} style={inputStyle}>
-              {COUNTRIES.map(([code, name]) => (
-                <option key={code} value={code}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </Label>
-        </div>
+        <Label text="Country you sell to">
+          <select class="gmc-input" value={country} onChange={(event) => setCountry((event.currentTarget as unknown as HTMLSelectElement).value)}>
+            {COUNTRIES.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </Label>
+        <Label full text="Product link" hint="Where shoppers land from Google. Use {slug} or {product_id}; {variant_id} opens the variant.">
+          <input class="gmc-input" value={linkTemplate} onInput={(event) => setLinkTemplate(value(event))} />
+        </Label>
       </div>
-
-      <Label text="Product link" hint="Where shoppers land from Google. Use {slug} or {product_id}; {variant_id} opens the variant.">
-        <input value={linkTemplate} onInput={(event) => setLinkTemplate((event.currentTarget as HTMLInputElement).value)} style={inputStyle} />
-      </Label>
-
-      {checks.length > 0 && <Checklist items={checks} />}
-
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div class="gmc-actions">
         <Button disabled={busy} onClick={requestConnect}>
           {busy ? 'Checking…' : status === 'disconnected' ? 'Connect' : 'Check again'}
         </Button>
         {status !== 'disconnected' && (
-          <Button kind="danger" disabled={busy} onClick={() => setConfirming(true)}>
+          <Button kind="danger-text" disabled={busy} onClick={() => setConfirming(true)}>
             Disconnect
           </Button>
         )}
       </div>
+    </Step>
+  );
+
+  const attention = status === 'broken' || (failedCheck && !allOk);
+  const market = view.market;
+
+  return (
+    <Root>
+      <Card>
+        <Pill tone={attention ? 'bad' : connected ? 'ok' : 'neutral'}>{attention ? 'Needs attention' : connected ? 'Connected' : 'Not connected'}</Pill>
+        {status === 'broken' && (
+          <Notice tone="bad">
+            Google stopped accepting the connection{view.connection.last_error ? `: ${view.connection.last_error}` : ''}. Fix it and press Check again, or add a new key.
+          </Notice>
+        )}
+        {status !== 'broken' && view.connection.last_error && <span style={{ color: 'var(--bad)' }}>{view.connection.last_error}</span>}
+        {connected && (
+          <dl class="gmc-facts">
+            <dt>Account ID</dt>
+            <dd>{view.connection.merchant_id}</dd>
+            <dt>Service account</dt>
+            <dd class="gmc-ellip" title={view.connection.client_email ?? undefined}>
+              {view.connection.client_email}
+            </dd>
+            {market && (
+              <>
+                <dt>Country</dt>
+                <dd>
+                  {countryName(market.country)} ({market.language}, {market.currency})
+                </dd>
+                <dt>Product link</dt>
+                <dd class="gmc-ellip" title={market.link_template}>
+                  {market.link_template}
+                </dd>
+              </>
+            )}
+          </dl>
+        )}
+      </Card>
+
+      {error && <Notice tone="bad">{error}</Notice>}
+
+      {connected ? (
+        <>
+          <details class="gmc-guide gmc-card">
+            <summary>Setup guide</summary>
+            {guide}
+          </details>
+          {connectStep}
+        </>
+      ) : (
+        <>
+          {guide}
+          {connectStep}
+        </>
+      )}
 
       {changingCountry && view.market && (
         <Modal title="Change the country?" onClose={() => setChangingCountry(false)}>
           <span>
             Your products listed for {countryName(view.market.country)} will be removed from Google and sent again for {countryName(country)}.
           </span>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <div class="gmc-actions end">
             <Button kind="secondary" onClick={() => setChangingCountry(false)}>
               Cancel
             </Button>
@@ -277,7 +353,7 @@ export default function GoogleConnect(props: ComponentProps) {
             Also remove the products this store sent to Google
           </label>
           {error && <Notice tone="bad">{error}</Notice>}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <div class="gmc-actions end">
             <Button kind="secondary" onClick={() => setConfirming(false)}>
               Cancel
             </Button>
@@ -287,6 +363,6 @@ export default function GoogleConnect(props: ComponentProps) {
           </div>
         </Modal>
       )}
-    </Stack>
+    </Root>
   );
 }
