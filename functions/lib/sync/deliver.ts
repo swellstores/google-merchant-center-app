@@ -6,6 +6,7 @@ import { deleteProductInput, insertProductInput, patchProductInput, type Product
 import { buildOffers, marketOfInput, parseInputId, type OfferDefaults, type SkipReason } from '../mapping/offers';
 import type { GoogleFields, SwellProduct } from '../mapping/types';
 import { listOf, type BatchOp, type Outbox } from '../swell-batch';
+import { pendingStatus, skippedStatus, statusFields, type ProductStatus } from '../status/product-status';
 import { iso, type Budget } from '../time';
 import type { WorkUnit } from './queue';
 
@@ -141,6 +142,8 @@ interface Settled {
   short?: GoogleApiError;
   charge?: boolean;
   fields?: GoogleFields;
+  /** Written with the sync fields; absent when the product keeps its stored status */
+  status?: ProductStatus;
 }
 
 function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResult>, attempted: Set<string>): Settled {
@@ -198,10 +201,16 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
   if (!plan.product) return { keep: false };
   const date_synced = iso(env.ctx.now());
   if (plan.skipped) {
-    return { keep: false, fields: { sync_state: 'skipped', sync_reason: plan.skipped, sync_error: errors[0] ?? null, input_ids: stillThere, date_synced } };
+    return {
+      keep: false,
+      fields: { sync_state: 'skipped', sync_reason: plan.skipped, sync_error: errors[0] ?? null, input_ids: stillThere, date_synced },
+      status: skippedStatus(plan.skipped),
+    };
   }
+  const stored = (plan.product.$app?.[env.ctx.appId] as GoogleFields | undefined)?.status;
   return {
     keep: false,
+    status: !stored || stored === 'not_sent' || stored === 'excluded' ? pendingStatus() : undefined,
     fields: {
       sync_state: errors.length ? 'error' : 'sent',
       sync_reason: null,
@@ -267,7 +276,10 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[], read?: Map<st
     if (plan.product && settled.fields) {
       // `$set` inside the app's object replaces the list; any other form merges it by position.
       const { input_ids, ...fields } = settled.fields;
-      env.outbox.add({ method: 'put', url: `/products/${plan.product.id}`, data: { $app: { [env.ctx.appId]: { ...fields, $set: { input_ids } } } } });
+      const status = settled.status ? statusFields(settled.status, env.ctx.now()) : {};
+      const { $set: statusSet, ...statusPlain } = status as { $set?: Record<string, unknown> };
+      const app = { ...fields, ...statusPlain, $set: { input_ids, ...statusSet } };
+      env.outbox.add({ method: 'put', url: `/products/${plan.product.id}`, data: { $app: { [env.ctx.appId]: app } } });
     }
   }
   // A part was rate limited or failed on Google's side: the courier settles what it has and backs off.

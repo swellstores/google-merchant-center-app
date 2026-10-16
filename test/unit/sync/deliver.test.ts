@@ -93,6 +93,53 @@ describe('deliver', () => {
     expect(appFields('p1')).toMatchObject({ sync_state: 'skipped', sync_reason: 'excluded', input_ids: [] });
   });
 
+  it('a first send marks the product pending', async () => {
+    const { env, appFields } = setup([mug()]);
+    await deliver(env, [unit('p1')]);
+    expect(appFields('p1')).toMatchObject({ status: 'pending', status_label: 'Pending', status_issues: [], date_status: expect.any(String) });
+    expect(appFields('p1').status_hash).toEqual(expect.any(String));
+  });
+
+  it('a resend keeps an approved status', async () => {
+    const stored = { status: 'approved', status_label: 'Approved', status_hash: 'abc', input_ids: ['en~US~p1'] };
+    const { env, appFields } = setup([mug({ $app: { [APP_ID]: stored } })]);
+    await deliver(env, [unit('p1')]);
+    expect(appFields('p1')).toMatchObject({ status: 'approved', status_label: 'Approved', status_hash: 'abc', sync_state: 'sent' });
+  });
+
+  it('a skipped product gets its reason as status', async () => {
+    const { env, appFields } = setup([mug({ price: 0, images: [] })]);
+    await deliver(env, [unit('p1')]);
+    const fields = appFields('p1');
+    expect(fields).toMatchObject({ sync_state: 'skipped', status: 'not_sent' });
+    expect(fields.status_label).toMatch(/^Not sent: /);
+  });
+
+  it('a product hidden from Google gets the excluded status', async () => {
+    const { env, appFields } = setup([mug({ $app: { [APP_ID]: { excluded: true } } })]);
+    await deliver(env, [unit('p1')]);
+    expect(appFields('p1')).toMatchObject({ status: 'excluded', status_label: 'Hidden from Google' });
+  });
+
+  it('a product that comes back from not sent is pending', async () => {
+    const stored = { status: 'not_sent', status_label: 'Not sent: inactive', status_hash: 'x', status_issues: [], input_ids: [] };
+    const { env, appFields } = setup([mug({ $app: { [APP_ID]: stored } })]);
+    await deliver(env, [unit('p1')]);
+    expect(appFields('p1')).toMatchObject({ status: 'pending', status_label: 'Pending' });
+  });
+
+  it('one PUT per product with input_ids and status_issues in one $set', async () => {
+    const { env, swell } = setup([mug()]);
+    await deliver(env, [unit('p1')]);
+    const puts = batchesOf(swell).flat().filter((op) => op.method === 'put' && op.url === '/products/p1');
+    expect(puts).toHaveLength(1);
+    const app = (puts[0].data as any).$app[APP_ID];
+    expect(app.$set).toEqual({ input_ids: ['en~US~p1'], status_issues: [] });
+    expect(app).not.toHaveProperty('input_ids');
+    expect(app).not.toHaveProperty('status_issues');
+    expect(Object.keys((puts[0].data as any).$app)).toEqual([APP_ID]);
+  });
+
   it('deletes the inputs of a deleted product without writing to it', async () => {
     const { google, env } = setup([]);
     google.inputs.set(`${DS}|en~US~v1`, {});
