@@ -76,11 +76,18 @@ export class Outbox {
     return this.ops.length;
   }
 
-  /** Sends the waiting writes and `ops` in one round trip; resolves with the answers to `ops`. */
+  /**
+   * Sends the waiting writes and `ops` in one round trip; resolves with the
+   * answers to `ops`. A put of `ops` takes in a waiting put to the same record.
+   */
   async send(ops: BatchOp[] = []): Promise<unknown[]> {
     const waiting = this.ops;
     this.ops = [];
-    const answers = await swellBatch(this.swell, [...waiting, ...ops]);
+    const joined = ops.map((op) => {
+      const index = op.method === 'put' ? waiting.findIndex((other) => other.method === 'put' && other.url === op.url) : -1;
+      return index < 0 ? op : { ...op, data: { ...waiting.splice(index, 1)[0].data, ...op.data } };
+    });
+    const answers = await swellBatch(this.swell, [...waiting, ...joined]);
     return answers.slice(waiting.length);
   }
 }

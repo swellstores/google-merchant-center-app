@@ -128,4 +128,17 @@ describe('Outbox', () => {
     expect(await new Outbox(swell).send()).toEqual([]);
     expect(swell.post).not.toHaveBeenCalled();
   });
+
+  it('joins a waiting put into a put it sends to the same record, which answers for both', async () => {
+    const { swell } = createFakeSwell();
+    const outbox = new Outbox(swell);
+    outbox.add({ method: 'put', url: '/sync-states/s1', data: { a: 1, b: 1 } }, { method: 'post', url: '/alarms', data: { wake_at: null } });
+    const [state] = await outbox.send([{ method: 'put', url: '/sync-states/s1', data: { b: 2 } }]);
+    expect(swell.post.mock.calls[0][1]).toEqual([
+      { method: 'post', url: '/alarms', data: { wake_at: null } },
+      { method: 'put', url: '/sync-states/s1', data: { a: 1, b: 2 } },
+    ]);
+    expect(state).toMatchObject({ id: 's1', a: 1, b: 2 });
+    expect(outbox.size).toBe(0);
+  });
 });
