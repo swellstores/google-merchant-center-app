@@ -1,6 +1,6 @@
 import { ensureDataSources, marketsRead, type Market } from '../connection/markets';
 import { connectionRead, connectionWrite, type Connection } from '../connection/store';
-import { accessTokenFor, brokenPatch } from '../connection/token';
+import { accessTokenFor, brokenPatch, tokenFresh } from '../connection/token';
 import { measured, type AppContext } from '../context';
 import { GoogleApiError } from '../google/http';
 import type { OfferDefaults } from '../mapping/offers';
@@ -16,7 +16,8 @@ import { stateById, stateRead, stateWrite, type FullSyncJob, type SyncState } fr
 
 export { PASS_PRODUCTS };
 
-export const COURIER_BUDGET_MS = 7000;
+/** The whole run, its end included: the gates leave room for it. */
+export const COURIER_BUDGET_MS = 8000;
 /** A mark older than this belongs to a run the platform killed. */
 export const RUNNING_TTL_MS = 30_000;
 export const NEXT_RUN_MS = 15_000;
@@ -107,6 +108,27 @@ function firstRead(queue: QueueItem[], job: FullSyncJob | null | undefined): Bat
 const reportSlow = (budget: Budget) =>
   console.warn(`Courier: no time for a pass (Swell ${budget.swellMs} ms per round trip, Google ${budget.googleMs} ms per call)`);
 
+/** The Google calls and Swell round trips the preamble still has to make, as the start read shows. */
+function preambleCost(connection: Connection, state: SyncState | null, markets: Market[], now: number) {
+  const missing = markets.filter((market) => !market.data_source).length;
+  return {
+    google: (tokenFresh(connection, now) ? 0 : 1) + (state?.quota?.date_checked ? 0 : 1) + (missing ? 1 + missing : 0),
+    // A created data source is read back and stored (Ruling 8).
+    swell: 2 * missing,
+  };
+}
+
+/** A token, the quota for pacing, and a data source for every market. `activate` normally leaves nothing to do. */
+async function prepare(run: Run): Promise<{ token: string; markets: Market[] }> {
+  const { ctx, connection, state, outbox } = run;
+  const token = await accessTokenFor(ctx, connection, (patch) => outbox.add(connectionWrite(connection.id, patch)));
+  if (!state.quota?.date_checked) {
+    state.quota = await readQuota(ctx, token, connection.merchant_id!, state.quota);
+    run.quotaChanged = true;
+  }
+  return { token, markets: await ensureDataSources(ctx, token, connection.merchant_id!, run.markets) };
+}
+
 async function work(run: Run): Promise<WorkResult> {
   const { ctx, connection, state, budget, outbox } = run;
   let sent = 0;
@@ -114,16 +136,7 @@ async function work(run: Run): Promise<WorkResult> {
   let job = state.full_sync;
   let passes = 0;
 
-  const token = await accessTokenFor(ctx, connection, (patch) => outbox.add(connectionWrite(connection.id, patch)));
-  // Pacing needs the per-minute limit from the first run on.
-  if (!state.quota?.date_checked) {
-    const quota = await readQuota(ctx, token, connection.merchant_id!, state.quota);
-    if (quota) {
-      state.quota = quota;
-      run.quotaChanged = true;
-    }
-  }
-  const markets = await ensureDataSources(ctx, token, connection.merchant_id!, run.markets);
+  const { token, markets } = await prepare(run);
   const env: DeliveryEnv = { ctx, accountId: connection.merchant_id!, token, markets, defaults: DEFAULTS, budget, outbox };
   const reread = stateById(state.id);
   /** A pass needs its remaining Swell round trips, the run's end included, and a Google call. */
@@ -277,12 +290,24 @@ export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
     return { next: 'idle', sent: 0 };
   }
 
-  // The mark with the first read, the pass's writes and the end: a run without
-  // time for them only asks to come back.
-  if (!budget.allows(3)) {
-    reportSlow(budget);
-    const ending: Ending = { ctx, state: state ?? ({} as SyncState), outbox, connection, alarm, quotaChanged: false };
-    return finish(ending, { sent: 0, queueMore: true, job: state?.full_sync });
+  // The preamble, the mark with the first read, a Google batch, the pass's
+  // writes and the end. A run without time for them only asks to come back,
+  // after the preamble when that fits, so the next run has time to send.
+  const preamble = preambleCost(connection, state, start.markets, now);
+  if (!budget.allows(3 + preamble.swell, 1 + preamble.google)) {
+    const setUp = (preamble.google > 0 || preamble.swell > 0) && budget.allows(1 + preamble.swell, preamble.google);
+    if (!setUp) reportSlow(budget);
+    const run: Run = { ctx, budget, outbox, connection, state: state ?? ({} as SyncState), quotaChanged: false, alarm, markets: start.markets, queue: [], waiting: 0 };
+    let result: WorkResult = { sent: 0, queueMore: true, job: state?.full_sync };
+    if (setUp) {
+      try {
+        await prepare(run);
+      } catch (error) {
+        if (!(error instanceof GoogleApiError)) return rearmAndThrow(run, error);
+        result = { ...result, failure: error };
+      }
+    }
+    return finish(run, result);
   }
 
   // A run killed at 10 s leaves no future run; the dead-man alarm comes after
@@ -315,14 +340,17 @@ export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
   try {
     result = await work(run);
   } catch (error) {
-    if (!(error instanceof GoogleApiError)) {
-      const retryAt = ctx.now() + NEXT_RUN_MS;
-      const rearm = alarmWrite(run.alarm, retryAt);
-      if (rearm) outbox.add(rearm);
-      await outbox.send([stateWrite(current.id, { running_since: null, not_before: iso(retryAt) })]).catch(() => undefined);
-      throw error;
-    }
+    if (!(error instanceof GoogleApiError)) return rearmAndThrow(run, error);
     result = { sent: 0, failure: error, queueMore: true, job: current.full_sync };
   }
   return finish(run, result);
+}
+
+/** An unexpected error: the mark goes and the courier comes back soon, then the error goes on to the log. */
+async function rearmAndThrow(run: Run, error: unknown): Promise<never> {
+  const retryAt = run.ctx.now() + NEXT_RUN_MS;
+  const rearm = alarmWrite(run.alarm, retryAt);
+  if (rearm) run.outbox.add(rearm);
+  await run.outbox.send([stateWrite(run.state.id, { running_since: null, not_before: iso(retryAt) })]).catch(() => undefined);
+  throw error;
 }

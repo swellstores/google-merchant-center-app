@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadConnection } from '../../../functions/lib/connection/store';
 import { loadMarkets } from '../../../functions/lib/connection/markets';
-import { NEXT_RUN_MS, pacedDelay, PASS_PRODUCTS, runCourier } from '../../../functions/lib/sync/courier';
+import { COURIER_BUDGET_MS, NEXT_RUN_MS, pacedDelay, PASS_PRODUCTS, runCourier } from '../../../functions/lib/sync/courier';
+import { MAX_ATTEMPTS } from '../../../functions/lib/sync/queue';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
 import { APP_ID, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
@@ -420,9 +421,52 @@ describe('runCourier timing', () => {
 
   it('does several passes on a fast store', async () => {
     const { outcome, took, google } = await timed({ swellMs: 200, googleMs: 800 });
-    expect(google.batches()).toBe(5);
-    expect(outcome).toEqual({ next: 'soon', sent: 5 * PASS_PRODUCTS });
-    expect(took).toBeLessThan(7000);
+    // A Google call counts as at least 1 s in the gate: 6 passes, not 7.
+    expect(google.batches()).toBe(6);
+    expect(outcome).toEqual({ next: 'soon', sent: 6 * PASS_PRODUCTS });
+    expect(took).toBeLessThan(COURIER_BUDGET_MS);
+  });
+
+  it('does one pass at 1.3 s / 1.5 s and ends within 9 s, a give-up ending included', async () => {
+    const products = many(PASS_PRODUCTS);
+    const outage = { status: 503, body: { error: { message: 'The service is currently unavailable.' } } };
+    const store = await steady(products, { offerErrors: Object.fromEntries(products.map((p) => [p.id, outage])) });
+    for (const p of products) await enqueue(store.swell, { productId: p.id, kind: 'full' });
+    for (const item of store.collections['/queue-items']) item.attempts = MAX_ATTEMPTS - 1;
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 });
+    expect((await runCourier(testContext(slow.swell, slow.fetch, slow.now))).next).toBe('later');
+    const end = batchesOf(store.swell).at(-1)!;
+    expect(end.length).toBeGreaterThan(10);
+    expect(store.collections['/queue-items']).toHaveLength(0);
+    // Start, mark with the products, Google, the writes, and an ending of two server waves.
+    expect(slow.now() - NOW).toBe(1300 + 1300 + 1500 + 1300 + 2 * 1300);
+  });
+
+  it('refreshes the token in a run too short for a pass, so the next run can send', async () => {
+    const products = many(10);
+    const store = await steady(products, {}, { access_token: null, access_token_expires: null });
+    for (const p of products) await enqueue(store.swell, { productId: p.id, kind: 'full' });
+    const first = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 });
+    expect(await runCourier(testContext(first.swell, first.fetch, first.now))).toEqual({ next: 'soon', sent: 0 });
+    // Start, the token, the end: the mark, a Google batch, the writes and the end would not fit after the token.
+    expect(first.now() - NOW).toBe(1300 + 1500 + 1300);
+    expect(await loadConnection(store.swell)).toMatchObject({ access_token: 'token-1' });
+    const later = NOW + 60_000;
+    await saveState(store.swell, (await loadState(store.swell)).id, { not_before: null });
+    const second = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 }, later);
+    expect(await runCourier(testContext(second.swell, second.fetch, second.now))).toEqual({ next: 'soon', sent: PASS_PRODUCTS });
+    expect(second.now() - later).toBe(4 * 1300 + 1500);
+  });
+
+  it('does not ask for the quota on every run after Google failed to give it', async () => {
+    const store = await steady([MUG], { quotaError: { status: 503, body: { error: { message: 'unavailable' } } } });
+    await saveState(store.swell, (await loadState(store.swell)).id, { quota: null });
+    await enqueue(store.swell, { productId: 'p1', kind: 'full' });
+    await runCourier(store.ctx);
+    expect((await loadState(store.swell)).quota).toMatchObject({ date_checked: at(NOW) });
+    await enqueue(store.swell, { productId: 'p1', kind: 'full' });
+    await runCourier(store.ctx);
+    expect(store.google.requests.filter((r) => r.path.startsWith('/quota'))).toHaveLength(1);
   });
 
   it('says in the log when a store is too slow for even one pass', async () => {

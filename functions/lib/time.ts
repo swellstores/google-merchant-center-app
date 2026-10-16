@@ -2,6 +2,8 @@ export const iso = (ms: number) => new Date(ms).toISOString();
 
 /** What a Google call is taken to cost until the run has measured one. */
 export const GOOGLE_GUESS_MS = 1500;
+/** A quick call (a token) says little about a batch of product inputs. */
+export const GOOGLE_FLOOR_MS = 1000;
 
 /**
  * A run's time allowance (functions are killed at 10 s), with the slowest
@@ -33,13 +35,13 @@ export class Budget {
   }
 
   noteGoogle(ms: number): void {
-    this.googleMs = this.googleSeen ? Math.max(this.googleMs, ms) : ms;
+    this.googleMs = Math.max(GOOGLE_FLOOR_MS, this.googleSeen ? Math.max(this.googleMs, ms) : ms);
     this.googleSeen = true;
   }
 
-  /** Time for `swellTrips` more round trips to Swell and one Google call, at the slowest seen. */
-  allows(swellTrips: number): boolean {
-    return this.has(swellTrips * this.swellMs + this.googleMs);
+  /** Time for `swellTrips` more round trips to Swell and `googleCalls` Google calls, at the slowest seen. */
+  allows(swellTrips: number, googleCalls = 1): boolean {
+    return this.has(swellTrips * this.swellMs + googleCalls * this.googleMs);
   }
 }
 

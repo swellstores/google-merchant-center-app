@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
-import { quotaFromGroups, runHourly } from '../../../functions/lib/sync/hourly';
+import { quotaFromGroups, readQuota, runHourly } from '../../../functions/lib/sync/hourly';
 import { loadConnection } from '../../../functions/lib/connection/store';
 import { fixedClock, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, DEFAULT_QUOTA, type FakeGoogleOptions } from '../../helpers/fake-google';
@@ -40,6 +40,19 @@ describe('quotaFromGroups', () => {
   it('knows the group by its name when the methods are missing', () => {
     const group = { name: 'accounts/1/quotas/merchant-productinputs-insert', quotaLimit: '10', quotaMinuteLimit: '2' };
     expect(quotaFromGroups({ quotaGroups: [group] })).toEqual({ minute_limit: 2, daily_limit: 10 });
+  });
+});
+
+describe('readQuota', () => {
+  it('still marks the quota checked when Google fails to give it, so no run asks again before the daily refresh', async () => {
+    const google = createFakeGoogle({ quotaError: { status: 503, body: { error: { message: 'unavailable' } } } });
+    const ctx = testContext(createFakeSwell().swell, google.fetch);
+    expect(await readQuota(ctx, 'tok', '123', { minute_limit: 60 })).toEqual({ minute_limit: 60, date_checked: at(NOW) });
+  });
+
+  it('throws when Google refuses the key', async () => {
+    const google = createFakeGoogle({ quotaError: { status: 401, body: { error: { message: 'invalid credentials' } } } });
+    await expect(readQuota(testContext(createFakeSwell().swell, google.fetch), 'tok', '123')).rejects.toMatchObject({ kind: 'auth' });
   });
 });
 

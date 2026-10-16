@@ -5,14 +5,19 @@ import { keyOf, saveConnection, type Connection } from './store';
 
 const REFRESH_BEFORE_MS = 5 * 60_000;
 
+/** The cached token serves a while yet: no call to Google needed. */
+export function tokenFresh(connection: Connection, now: number): boolean {
+  const expires = connection.access_token_expires ? Date.parse(connection.access_token_expires) : 0;
+  return Boolean(connection.access_token) && expires - now > REFRESH_BEFORE_MS;
+}
+
 /**
  * The cached access token, or a new one stored on the connection. `save` takes
  * the new token's patch instead of writing it at once, for a caller that
  * writes the connection in its next batch.
  */
 export async function accessTokenFor(ctx: AppContext, connection: Connection, save?: (patch: Partial<Connection>) => void): Promise<string> {
-  const expires = connection.access_token_expires ? Date.parse(connection.access_token_expires) : 0;
-  if (connection.access_token && expires - ctx.now() > REFRESH_BEFORE_MS) return connection.access_token;
+  if (tokenFresh(connection, ctx.now())) return connection.access_token!;
   const key = keyOf(connection);
   if (!key) throw new AppError('not_connected', 'Google Merchant Center is not connected', 409);
   const fresh = await fetchAccessToken(ctx.fetch, key, ctx.now());

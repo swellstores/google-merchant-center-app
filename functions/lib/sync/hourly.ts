@@ -35,17 +35,17 @@ export function quotaFromGroups(body: { quotaGroups?: QuotaGroup[] }): { minute_
 
 /**
  * Google's limits for product inserts, as a quota to store. A refusal of the
- * key or the account (`auth`) throws; other Google errors keep the old limits
- * (`null`), and the next run asks again.
+ * key or the account (`auth`) throws; other Google errors keep the old limits,
+ * still marked checked so no run asks again before the daily refresh.
  */
-export async function readQuota(ctx: AppContext, token: string, accountId: string, previous?: QuotaInfo | null): Promise<QuotaInfo | null> {
+export async function readQuota(ctx: AppContext, token: string, accountId: string, previous?: QuotaInfo | null): Promise<QuotaInfo> {
+  let limits = {};
   try {
-    const limits = quotaFromGroups(await googleCall(ctx.fetch, token, listQuotas(accountId)));
-    return { ...previous, ...limits, date_checked: iso(ctx.now()) };
+    limits = quotaFromGroups(await googleCall(ctx.fetch, token, listQuotas(accountId)));
   } catch (error) {
     if (!(error instanceof GoogleApiError) || error.kind === 'auth') throw error;
-    return null;
   }
+  return { ...previous, ...limits, date_checked: iso(ctx.now()) };
 }
 
 /** Writes them all in one round trip; a refused entry fails the run. */
@@ -73,7 +73,7 @@ export async function runHourly(ctx: AppContext): Promise<void> {
     try {
       const token = await accessTokenFor(ctx, connection, (patch) => writes.push(connectionWrite(connection.id, patch)));
       const quota = await readQuota(ctx, token, connection.merchant_id, state?.quota);
-      if (quota) writes.push(stateWrite(state?.id, { quota: { $set: quota } }));
+      writes.push(stateWrite(state?.id, { quota: { $set: quota } }));
     } catch (error) {
       if (!(error instanceof GoogleApiError)) throw error;
       // Google refused the key or the account: the courier stops, nothing to wake.

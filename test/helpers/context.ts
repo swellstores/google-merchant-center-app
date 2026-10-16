@@ -21,8 +21,9 @@ export function testContext(swell: SwellClient, fetchFn: typeof fetch = unexpect
 
 /**
  * Swell and Google that take the given time per round trip, on a clock that
- * moves only then: a run's fake duration is its round trips. Calls made at
- * the same time overlap, as concurrent requests do.
+ * moves only then: a run's fake duration is its round trips. A `/:batch`
+ * costs a round trip per 10 operations (the server runs 10 at a time), and
+ * calls made at the same time overlap, as concurrent requests do.
  */
 export function slowServices(swell: SwellClient, fetchFn: typeof fetch, latency: { swellMs: number; googleMs: number }, start = NOW) {
   let t = start;
@@ -38,7 +39,10 @@ export function slowServices(swell: SwellClient, fetchFn: typeof fetch, latency:
     now: () => t,
     swell: {
       get: after(latency.swellMs, (url: string, query?: object) => swell.get(url, query)),
-      post: after(latency.swellMs, (url: string, data: object) => swell.post(url, data)),
+      post: (url: string, data: object) => {
+        const waves = url === '/:batch' && Array.isArray(data) ? Math.max(1, Math.ceil(data.length / 10)) : 1;
+        return after(latency.swellMs * waves, (u: string, d: object) => swell.post(u, d))(url, data);
+      },
       put: after(latency.swellMs, (url: string, data: object) => swell.put(url, data)),
       delete: after(latency.swellMs, (url: string, data?: object) => swell.delete(url, data)),
     } satisfies SwellClient,

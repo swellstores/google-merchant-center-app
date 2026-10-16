@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Budget, GOOGLE_GUESS_MS, iso, nextNoonUtc } from '../../functions/lib/time';
+import { Budget, GOOGLE_FLOOR_MS, GOOGLE_GUESS_MS, iso, nextNoonUtc } from '../../functions/lib/time';
 
 describe('time', () => {
   it('formats epoch ms as ISO', () => {
@@ -20,10 +20,29 @@ describe('time', () => {
     expect([budget.swellMs, budget.googleMs]).toEqual([0, GOOGLE_GUESS_MS]);
     budget.noteSwell(1200);
     budget.noteSwell(800);
-    budget.noteGoogle(600);
-    expect([budget.swellMs, budget.googleMs]).toEqual([1200, 600]);
-    budget.noteGoogle(900);
-    expect(budget.googleMs).toBe(900);
+    budget.noteGoogle(1100);
+    expect([budget.swellMs, budget.googleMs]).toEqual([1200, 1100]);
+    budget.noteGoogle(1300);
+    expect(budget.googleMs).toBe(1300);
+  });
+
+  it('never takes a Google call for less than 1 s', () => {
+    const budget = new Budget(() => 0, 8000);
+    budget.noteGoogle(300);
+    expect(budget.googleMs).toBe(GOOGLE_FLOOR_MS);
+    budget.noteGoogle(1400);
+    expect(budget.googleMs).toBe(1400);
+  });
+
+  it('counts the Google calls still to come', () => {
+    let now = 0;
+    const budget = new Budget(() => now, 8000);
+    budget.noteSwell(1300);
+    budget.noteGoogle(1500);
+    now = 1300;
+    expect(budget.allows(3)).toBe(true); // 3 × 1300 + 1500 = 5400 ≤ 6700
+    expect(budget.allows(3, 2)).toBe(false); // + a token refresh: 6900
+    expect(budget.allows(1, 1)).toBe(true);
   });
 
   it('allows a pass only with time for its Swell round trips and a Google call', () => {
