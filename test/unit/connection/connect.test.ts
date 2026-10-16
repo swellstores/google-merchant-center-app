@@ -75,6 +75,14 @@ describe('check', () => {
     expect(roundTrips(swell)).toBeLessThanOrEqual(4);
   });
 
+  it('stays under 9 s at 1.3 s a Swell round trip and 1.5 s a Google call, with a new key', async () => {
+    const { swell, google } = setup();
+    const slow = slowServices(swell, google.fetch, { swellMs: 1300, googleMs: 1500 });
+    expect((await check(testContext(slow.swell, slow.fetch, slow.now), CHECK())).report.ok).toBe(true);
+    // Read, key saved, token, registration, account ‖ website, result.
+    expect(slow.now() - NOW).toBe(1300 + 1300 + 1500 + 1500 + 1500 + 1300);
+  });
+
   it('keeps the key but stays disconnected when a check fails', async () => {
     const { ctx, swell } = setup({ homepage: { claimed: false } });
     const result = await check(ctx, CHECK());

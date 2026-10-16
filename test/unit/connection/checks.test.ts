@@ -62,6 +62,25 @@ describe('runChecks', () => {
     expect(last.message).toContain('another Merchant Center account');
   });
 
+  it('reports the account before the website when both fail', async () => {
+    const { report } = await check({
+      account: { status: 403, body: { error: { message: 'The caller does not have permission' } } },
+      homepage: { uri: 'https://shop.example.com', claimed: false },
+    });
+    expect(report.checks.map((c) => [c.id, c.ok])).toEqual([
+      ['key', true],
+      ['token', true],
+      ['registration', true],
+      ['account', false],
+    ]);
+  });
+
+  it('asks for the account and the website at the same time', async () => {
+    const { google } = await check();
+    const calls = google.requests.map((r) => r.path);
+    expect(calls.slice(-2).sort()).toEqual(['/accounts/v1/accounts/123', '/accounts/v1/accounts/123/homepage']);
+  });
+
   it('requires a verified and claimed website', async () => {
     const { report } = await check({ homepage: { uri: 'https://shop.example.com', claimed: false } });
     expect(report.ok).toBe(false);

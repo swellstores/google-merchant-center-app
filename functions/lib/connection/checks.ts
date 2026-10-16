@@ -25,6 +25,18 @@ const activating = (error: GoogleApiError) => error.status === 401 && errorReaso
 const ACTIVATING = 'Google is activating the registration of your Google Cloud project.';
 const ACTIVATING_HELP = 'This takes up to 5 minutes. Press Check again in a few minutes.';
 
+/** A call's outcome to look at later: its value, or its error thrown again. */
+async function settled<T>(call: Promise<T>): Promise<() => T> {
+  try {
+    const value = await call;
+    return () => value;
+  } catch (error) {
+    return () => {
+      throw error;
+    };
+  }
+}
+
 /** Every step a merchant can get wrong, in the order Google needs them. Stops at the first failure. */
 export async function runChecks(
   ctx: AppContext,
@@ -65,9 +77,15 @@ export async function runChecks(
   }
   checks.push({ id: 'registration', ok: true, message: 'The Google Cloud project is registered with this account' });
 
+  // Both reads go out together; the account is still judged first.
+  const [accountRead, homepageRead] = await Promise.all([
+    settled(googleCall<{ accountName?: string }>(ctx.fetch, token.token, getAccount(merchantId))),
+    settled(googleCall<{ uri?: string; claimed?: boolean }>(ctx.fetch, token.token, getHomepage(merchantId))),
+  ]);
+
   let account: { accountName?: string };
   try {
-    account = await googleCall(ctx.fetch, token.token, getAccount(merchantId));
+    account = accountRead();
   } catch (error) {
     if (!(error instanceof GoogleApiError)) throw error;
     if (!registeredBefore && activating(error)) return fail('account', ACTIVATING, ACTIVATING_HELP);
@@ -84,7 +102,7 @@ export async function runChecks(
 
   let homepage: { uri?: string; claimed?: boolean };
   try {
-    homepage = await googleCall(ctx.fetch, token.token, getHomepage(merchantId));
+    homepage = homepageRead();
   } catch (error) {
     if (!(error instanceof GoogleApiError)) throw error;
     if (!registeredBefore && activating(error)) return fail('homepage', ACTIVATING, ACTIVATING_HELP);
