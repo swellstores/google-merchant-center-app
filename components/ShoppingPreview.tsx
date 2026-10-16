@@ -1,21 +1,22 @@
 import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
-import { pickedCard, previewModel, type PreviewCard, type PreviewContext } from './lib/preview';
+import { imageState, pickedCard, previewModel, type PreviewCard, type PreviewContext } from './lib/preview';
 import type { SwellProduct } from '../functions/lib/mapping/types';
-import { Button, Card, Notice, Pill, Root } from './lib/ui';
+import { Button, Card, Notice, Pill, Root, Stack } from './lib/ui';
 
 export const config = { description: 'How the product looks in Google Shopping' };
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-function Offer({ card }: { card: PreviewCard }) {
+function Offer({ card, failed, onImageError }: { card: PreviewCard; failed: boolean; onImageError: (url: string) => void }) {
+  const state = failed ? 'failed' : card.image ? 'image' : 'missing';
   return (
     <div class="gmc-row">
-      {card.image ? (
-        <img src={card.image} alt="" width={96} height={96} style={{ objectFit: 'contain', flex: 'none', borderRadius: 6, border: '1px solid var(--border)', background: '#fff' }} />
+      {state === 'image' ? (
+        <img src={card.image!} alt="" width={96} height={96} onError={() => onImageError(card.image!)} style={{ objectFit: 'contain', flex: 'none', borderRadius: 6, border: '1px solid var(--border)', background: '#fff' }} />
       ) : (
-        <div class="gmc-muted" style={{ width: 96, height: 96, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border)', borderRadius: 6 }}>
+        <div class="gmc-muted" style={{ width: 96, height: 96, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--subtle)', border: '1px solid var(--border)', borderRadius: 6 }}>
           No image
         </div>
       )}
@@ -40,22 +41,27 @@ function Offer({ card }: { card: PreviewCard }) {
 
 function MarketCard({ cards }: { cards: PreviewCard[] }) {
   const [picked, setPicked] = useState<string | undefined>();
+  const [failedUrls, setFailedUrls] = useState<ReadonlySet<string>>(new Set());
   const card = pickedCard(cards, picked);
+  const failed = imageState(card.image, failedUrls) === 'failed';
   return (
     <Card>
-      <div class="gmc-actions">
-        <strong>{card.heading}</strong>
-        {cards.length > 1 && (
-          <select class="gmc-input" style={{ width: 'auto' }} aria-label={`Variant for ${card.heading}`} value={card.offerId} onChange={(e) => setPicked((e.currentTarget as HTMLSelectElement).value)}>
-            {cards.map((c) => (
-              <option key={c.offerId} value={c.offerId}>
-                {c.variant ?? c.title}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-      <Offer card={card} />
+      <Stack gap={12}>
+        <div class="gmc-actions">
+          <strong>{card.heading}</strong>
+          {cards.length > 1 && (
+            <select class="gmc-input" style={{ width: 'auto' }} aria-label={`Variant for ${card.heading}`} value={card.offerId} onChange={(e) => setPicked((e.currentTarget as HTMLSelectElement).value)}>
+              {cards.map((c) => (
+                <option key={c.offerId} value={c.offerId}>
+                  {c.variant ?? c.title}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <Offer card={card} failed={failed} onImageError={(url) => setFailedUrls((previous) => new Set(previous).add(url))} />
+        {failed && <Notice tone="bad">This image did not load. Google cannot use it either: upload it again or choose another image.</Notice>}
+      </Stack>
     </Card>
   );
 }

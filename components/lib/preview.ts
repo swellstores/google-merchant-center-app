@@ -81,3 +81,10 @@ export function previewModel(record: SwellProduct, context: PreviewContext): Pre
 export function pickedCard(cards: PreviewCard[], offerId: string | undefined): PreviewCard {
   return cards.find((c) => c.offerId === offerId) ?? cards[0];
 }
+
+export type ImageState = 'image' | 'failed' | 'missing';
+
+export function imageState(url: string | null, failed: ReadonlySet<string>): ImageState {
+  if (!url) return 'missing';
+  return failed.has(url) ? 'failed' : 'image';
+}

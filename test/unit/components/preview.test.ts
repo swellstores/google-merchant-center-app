@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickedCard, previewModel, type PreviewContext } from '../../../components/lib/preview';
+import { imageState, pickedCard, previewModel, type PreviewContext } from '../../../components/lib/preview';
 import type { SwellProduct } from '../../../functions/lib/mapping/types';
 
 const CONTEXT: PreviewContext = {
@@ -97,5 +97,17 @@ describe('previewModel', () => {
     const one = { ...CONTEXT, markets: [CONTEXT.markets[0]] };
     expect(previewModel(product({ name: 'Mug' }), one)).toMatchObject({ cards: [{ title: 'Mug' }] });
     expect(previewModel(product({ name: 'Cup', price: 20 }), one)).toMatchObject({ cards: [{ title: 'Cup', price: '$20.00' }] });
+  });
+});
+
+describe('imageState', () => {
+  it('shows the image until its URL failed to load', () => {
+    expect(imageState('https://cdn.example.com/a.jpg', new Set())).toBe('image');
+    expect(imageState('https://cdn.example.com/a.jpg', new Set(['https://cdn.example.com/a.jpg']))).toBe('failed');
+  });
+
+  it('a different URL is not failed, and no URL is missing', () => {
+    expect(imageState('https://cdn.example.com/b.jpg', new Set(['https://cdn.example.com/a.jpg']))).toBe('image');
+    expect(imageState(null, new Set(['x']))).toBe('missing');
   });
 });
