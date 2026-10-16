@@ -1,6 +1,8 @@
+import { connectionRead, type Connection } from '../connection/store';
 import type { AppContext, SwellClient } from '../context';
-import type { BatchOp } from '../swell-batch';
+import { listOf, recordOf, swellBatch, type BatchOp } from '../swell-batch';
 import { iso } from '../time';
+import { alarmRead, armWrite, ENQUEUE_DELAY_MS, type Alarm } from './alarm';
 
 export type QueueKind = 'full' | 'light' | 'delete';
 
@@ -75,6 +77,22 @@ export async function enqueue(swell: SwellClient, plan: QueuePlan): Promise<void
   const op = enqueueWrite(existing?.results?.[0], plan);
   if (op.method === 'post') await swell.post(op.url, op.data!);
   else await swell.put(op.url, op.data!);
+}
+
+/**
+ * Queues a product's change and makes sure the courier comes within
+ * ENQUEUE_DELAY_MS: one read, one write. While the store is not connected
+ * nothing is queued; the catalog sync after connecting again covers it.
+ */
+export async function queueChange(ctx: AppContext, plan: QueuePlan): Promise<void> {
+  const answers = await swellBatch(ctx.swell, [connectionRead, productItemsRead([plan.productId]), alarmRead]);
+  const connection = listOf<Connection>(answers[0], 'the connection')[0];
+  if (connection?.status !== 'connected') return;
+  const current = listOf<QueueItem>(answers[1], 'the queue')[0];
+  const wake = armWrite(listOf<Alarm>(answers[2], 'the alarm')[0] ?? null, ctx.now(), ENQUEUE_DELAY_MS);
+  const writes = [enqueueWrite(current, plan), ...(wake ? [wake] : [])];
+  const results = await swellBatch(ctx.swell, writes);
+  results.forEach((result, i) => recordOf(result, `the write to ${writes[i].url}`));
 }
 
 /** The oldest items, leaving out `exclude` (items this run took already). */

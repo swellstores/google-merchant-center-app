@@ -40,13 +40,12 @@ export async function setAlarm(ctx: AppContext, at: number | null): Promise<void
 }
 
 /**
- * Makes sure the courier runs within `delayMs`. An alarm that rings sooner is
- * kept; one in the past is replaced, because its run may already be over.
+ * The write that makes sure the courier runs within `delayMs`, or null. An
+ * alarm that rings sooner is kept; one in the past is replaced, because its
+ * run may already be over.
  */
-export async function armAlarm(ctx: AppContext, delayMs: number): Promise<void> {
-  const alarm = await loadAlarm(ctx.swell);
-  const now = ctx.now();
-  const current = alarm.wake_at ? Date.parse(alarm.wake_at) : null;
-  if (current !== null && current > now && current <= now + delayMs) return;
-  await ctx.swell.put(`${COLLECTION}/${alarm.id}`, { wake_at: iso(now + delayMs) });
+export function armWrite(alarm: Alarm | null, now: number, delayMs: number): BatchOp | null {
+  const current = alarm?.wake_at ? Date.parse(alarm.wake_at) : null;
+  if (current !== null && current > now && current <= now + delayMs) return null;
+  return alarmWrite(alarm, now + delayMs);
 }
