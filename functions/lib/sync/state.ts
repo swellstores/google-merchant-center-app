@@ -34,12 +34,18 @@ const FIRST = { limit: 1, sort: 'date_created asc' };
 export const stateRead: BatchOp = { method: 'get', url: COLLECTION, data: FIRST };
 export const stateById = (id: string): BatchOp => ({ method: 'get', url: `${COLLECTION}/${id}` });
 
+/** `{ $set: value }` → `value`: operators are for updates, a create takes plain values. */
+const plain = (patch: Record<string, unknown>) =>
+  Object.fromEntries(
+    Object.entries(patch).map(([key, value]) => [key, value && typeof value === 'object' && '$set' in value ? (value as { $set: unknown }).$set : value]),
+  );
+
 /**
  * A patch of the state, creating the record when there is none yet. Objects
  * (`full_sync`, `quota`) are replaced whole with `{ $set: … }` so cleared fields really clear.
  */
 export function stateWrite(id: string | null | undefined, patch: Record<string, unknown>): BatchOp {
-  return id ? { method: 'put', url: `${COLLECTION}/${id}`, data: patch } : { method: 'post', url: COLLECTION, data: { backoff: 0, ...patch } };
+  return id ? { method: 'put', url: `${COLLECTION}/${id}`, data: patch } : { method: 'post', url: COLLECTION, data: { backoff: 0, ...plain(patch) } };
 }
 
 /** A catalog sync from the first product; the first page fills in `total`. */

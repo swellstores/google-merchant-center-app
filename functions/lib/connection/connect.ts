@@ -147,11 +147,11 @@ export async function activate(ctx: AppContext, input: ActivateInput): Promise<S
   const marketAt = writes.length - 1;
   const now = ctx.now();
   if (restart) writes.push(stateWrite(state?.id, { full_sync: { $set: newFullSyncJob(now) } }));
-  if (restart || queued || job?.status === 'running') {
-    const wake = alarmWrite(alarm, now);
-    if (wake) writes.push(wake);
-  }
+  const wake = restart || queued || job?.status === 'running' ? alarmWrite(alarm, now) : null;
+  if (wake) writes.push(wake);
   const results = await swellBatch(ctx.swell, writes);
+  // A refused write must fail the route: "connected" with nothing syncing would hide it.
+  results.forEach((result, i) => recordOf(result, `the write to ${writes[i].url}`));
   const market = recordOf<Market>(results[marketAt], 'the market');
   return { connection: publicConnection(connection), market, defaults: defaultsOf(ctx) };
 }

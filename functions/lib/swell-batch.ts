@@ -68,11 +68,11 @@ export class Outbox {
     return this.ops.length;
   }
 
-  /** Sends the waiting writes and `reads` in one round trip; resolves with the answers to `reads`. */
-  async send(reads: BatchOp[] = []): Promise<unknown[]> {
-    const writes = this.ops;
+  /** Sends the waiting writes and `ops` in one round trip; resolves with the answers to `ops`. */
+  async send(ops: BatchOp[] = []): Promise<unknown[]> {
+    const waiting = this.ops;
     this.ops = [];
-    const answers = await swellBatch(this.swell, [...writes, ...reads]);
-    return answers.slice(writes.length);
+    const answers = await swellBatch(this.swell, [...waiting, ...ops]);
+    return answers.slice(waiting.length);
   }
 }

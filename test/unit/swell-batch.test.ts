@@ -47,6 +47,23 @@ describe('swellBatch', () => {
   });
 });
 
+describe('the fake store', () => {
+  it('refuses a create with an update operator, like the platform', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { swell } = createFakeSwell();
+    const [answer] = await swellBatch(swell, [{ method: 'post', url: '/sync-states', data: { full_sync: { $set: {} } } }]);
+    expect(entryError(answer)).toBe('operators are for updates');
+    await expect(swell.post('/sync-states', { quota: { $set: {} } })).rejects.toThrow('operators are for updates');
+  });
+
+  it('creates a record on a PUT to an id that does not exist', async () => {
+    const { swell, collections } = createFakeSwell();
+    await swellBatch(swell, [{ method: 'put', url: '/alarms/a1', data: { wake_at: null } }]);
+    await swell.put('/alarms/a2', { wake_at: null });
+    expect(collections['/alarms'].map((alarm) => alarm.id)).toEqual(['a1', 'a2']);
+  });
+});
+
 describe('entryError', () => {
   it('reads both shapes of a refused entry', () => {
     expect(entryError({ $error: 'Not permitted' })).toBe('Not permitted');

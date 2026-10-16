@@ -37,6 +37,13 @@ function applyPatch(doc: Doc, patch: Doc): Doc {
   return doc;
 }
 
+/** An update operator such as `$set`, which the platform takes on updates only; `$app` is a namespace. */
+function hasOperator(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasOperator);
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).some(([key, inner]) => (key.startsWith('$') && key !== '$app') || hasOperator(inner));
+}
+
 export interface FakeSwellInit {
   products?: Doc[];
   connection?: Doc;
@@ -103,14 +110,18 @@ export function createFakeSwell(init: FakeSwellInit = {}) {
     post: async (url: string, data: Doc) => {
       const list = collections[url];
       if (!list) throw new Error(`unexpected POST ${url}`);
+      if (hasOperator(data)) throw new Error('operators are for updates');
       const doc = applyPatch(record({}), data);
       list.push(doc);
       return structuredClone(doc);
     },
     put: async (url: string, patch: Doc) => {
       const parts = split(url);
-      const doc = parts?.id ? collections[parts.name]?.find((d) => d.id === parts.id) : undefined;
-      if (!doc) throw new Error(`unexpected PUT ${url}`);
+      const list = parts?.id ? collections[parts.name] : undefined;
+      if (!list) throw new Error(`unexpected PUT ${url}`);
+      let doc = list.find((d) => d.id === parts!.id);
+      // Like the platform: a PUT to an id that does not exist creates the record.
+      if (!doc) list.push((doc = { ...record({}), id: parts!.id }));
       return structuredClone(applyPatch(doc, patch));
     },
     delete: async (url: string) => {
@@ -130,8 +141,12 @@ export function createFakeSwell(init: FakeSwellInit = {}) {
     const parts = split(op.url);
     const list = parts && collections[parts.name];
     if (!list) return { $error: `Unknown path ${op.url}` };
-    if (parts.id && !list.some((d) => d.id === parts.id)) return null;
-    return impl[op.method](op.url, op.data ?? {});
+    if (parts.id && op.method !== 'put' && !list.some((d) => d.id === parts.id)) return null;
+    try {
+      return await impl[op.method](op.url, op.data ?? {});
+    } catch (error) {
+      return { $error: (error as Error).message };
+    }
   }
 
   const swell = {

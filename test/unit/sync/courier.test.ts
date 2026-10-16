@@ -243,7 +243,7 @@ describe('runCourier round trips', () => {
     expect(opsOf(start)).toEqual(['get /connections', 'get /sync-states', 'get /alarms', 'get /markets', 'get /queue-items']);
     expect(opsOf(mark)).toEqual(['put /sync-states/:id', 'post /alarms']);
     expect(opsOf(sent)).toEqual(['put /products/p1', 'get /queue-items', 'get /sync-states/:id']);
-    expect(opsOf(end)).toEqual(['delete /queue-items/:id', 'put /sync-states/:id', 'put /alarms/:id']);
+    expect(opsOf(end)).toEqual(['delete /queue-items/:id', 'put /alarms/:id', 'put /sync-states/:id']);
     expect(swell.get.mock.calls.map(([url]) => url)).toEqual(['/products']);
     expect(swell.put).not.toHaveBeenCalled();
     expect(swell.delete).not.toHaveBeenCalled();
@@ -311,6 +311,16 @@ describe('runCourier round trips', () => {
     refuse((method, url) => (url === '/connections' ? 'Permission denied' : null));
     await expect(runCourier(ctx)).rejects.toThrow('Swell refused to read the connection: Permission denied');
     expect(log).toHaveBeenCalledWith(expect.stringContaining('GET /connections: Permission denied'));
+    log.mockRestore();
+  });
+
+  it('fails the run when Swell refuses its last state write', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { ctx, swell, refuse } = await steady();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    let writes = 0;
+    refuse((method, url) => (method === 'put' && url.startsWith('/sync-states/') && ++writes === 2 ? 'Permission denied' : null));
+    await expect(runCourier(ctx)).rejects.toThrow('Permission denied');
     log.mockRestore();
   });
 

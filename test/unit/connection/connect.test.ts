@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { activate, check, connectionStatus, disconnect } from '../../../functions/lib/connection/connect';
 import { loadMarkets } from '../../../functions/lib/connection/markets';
 import { loadConnection, saveConnection } from '../../../functions/lib/connection/store';
@@ -17,6 +17,10 @@ let keyJson: string;
 beforeAll(async () => {
   ({ key } = await makeServiceAccountKey());
   keyJson = JSON.stringify({ type: 'service_account', ...key });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 const at = (ms: number) => new Date(ms).toISOString();
@@ -143,6 +147,25 @@ describe('activate', () => {
     expect(view.market).toMatchObject({ country: 'US', language: 'en', currency: 'USD', link_template: MARKET.link_template, data_source: null });
     expect((await loadState(swell)).full_sync).toEqual({ status: 'running', cursor: null, total: 0, done: 0, date_started: at(NOW + 60_000), date_finished: null });
     expect((await loadAlarm(swell)).wake_at).toBe(at(NOW + 60_000));
+  });
+
+  it('creates the state of a fresh store with the job as a plain object', async () => {
+    const { ctx, swell, collections } = setup();
+    expect(collections['/sync-states']).toHaveLength(0);
+    await connect(ctx);
+    expect(collections['/sync-states']).toEqual([expect.objectContaining({ full_sync: expect.objectContaining({ status: 'running', cursor: null }) })]);
+    expect(batchesOf(swell).flat().find((op) => op.method === 'post' && op.url === '/sync-states')?.data).toEqual({
+      backoff: 0,
+      full_sync: { status: 'running', cursor: null, total: 0, done: 0, date_started: at(NOW), date_finished: null },
+    });
+  });
+
+  it.each(['/sync-states', '/alarms'])('fails when Swell refuses its write to %s', async (path) => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { ctx, refuse } = setup();
+    await check(ctx, CHECK());
+    refuse((method, url) => (method !== 'get' && url.startsWith(path) ? 'Permission denied' : null));
+    await expect(activate(later(ctx), MARKET)).rejects.toThrow('Permission denied');
   });
 
   it('does not restart the catalog sync on a repeated check', async () => {

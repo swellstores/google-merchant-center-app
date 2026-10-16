@@ -187,11 +187,12 @@ async function finish(run: Run, result: WorkResult): Promise<CourierOutcome> {
     outcome = { next: 'idle', sent };
   }
 
-  outbox.add(stateWrite(state.id, patch));
   if (Object.keys(run.connectionPatch).length) outbox.add(connectionWrite(run.connection.id, run.connectionPatch));
   const alarm = alarmWrite(run.alarm, at);
   if (alarm) outbox.add(alarm);
-  await outbox.send();
+  // A refused state write fails the run; the dead-man alarm brings the next one.
+  const [saved] = await outbox.send([stateWrite(state.id, patch)]);
+  recordOf(saved, 'the run’s end');
   return outcome;
 }
 
