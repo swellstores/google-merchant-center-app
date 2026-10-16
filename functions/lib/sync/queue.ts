@@ -61,13 +61,14 @@ export function enqueueWrite(current: QueueItem | undefined, plan: QueuePlan): B
   return {
     method: 'put',
     url: `${COLLECTION}/${current.id}`,
+    // An update merges arrays by position and never shortens them: lists are replaced.
     data: {
       kind: mergeKind(current.kind, plan.kind),
       revision: (current.revision ?? 0) + 1,
       // The product changed: every offer is sent again. Offers sent for the old
       // revision stay known, so the courier deletes them if they vanished.
-      input_ids: [...new Set([...(current.input_ids ?? []), ...(current.done_input_ids ?? []), ...(plan.inputIds ?? [])])],
-      done_input_ids: [],
+      input_ids: { $set: [...new Set([...(current.input_ids ?? []), ...(current.done_input_ids ?? []), ...(plan.inputIds ?? [])])] },
+      done_input_ids: { $set: [] },
     },
   };
 }
@@ -169,10 +170,12 @@ export function settleWrites(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]
       url: `${COLLECTION}/${keep}`,
       data: {
         kind: mergeKind(item.kind, unit.kind),
-        input_ids: [...new Set([...(item.input_ids ?? []), ...unit.inputIds])],
-        done_input_ids: unchanged(unit, keep)
-          ? [...new Set([...(item.done_input_ids ?? []), ...(unit.doneInputIds ?? []), ...(unit.progress ?? [])])]
-          : (item.done_input_ids ?? []),
+        input_ids: { $set: [...new Set([...(item.input_ids ?? []), ...unit.inputIds])] },
+        done_input_ids: {
+          $set: unchanged(unit, keep)
+            ? [...new Set([...(item.done_input_ids ?? []), ...(unit.doneInputIds ?? []), ...(unit.progress ?? [])])]
+            : [...new Set(item.done_input_ids ?? [])],
+        },
         attempts,
         last_error: unit.error ?? item.last_error ?? null,
       },

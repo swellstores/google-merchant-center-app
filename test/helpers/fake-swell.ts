@@ -24,15 +24,46 @@ function matches(doc: Doc, where: Doc = {}): boolean {
   });
 }
 
+const isPlain = (value: unknown): value is Doc => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * One value of an update, merged the way the platform merges it: objects at
+ * every depth, arrays by position (never shorter, so `[]` changes nothing).
+ * `{ $set: v }` on a field replaces it, except inside `$app`, where that form
+ * merges like a plain value. Arrays of records with ids (merged by id) are not
+ * modelled: the app never writes them.
+ */
+function merge(stored: unknown, value: unknown, fieldSetReplaces: boolean): unknown {
+  if (isPlain(value) && '$set' in value) {
+    return fieldSetReplaces ? structuredClone(value.$set) : merge(stored, value.$set, fieldSetReplaces);
+  }
+  if (Array.isArray(value)) {
+    const result = Array.isArray(stored) ? [...stored] : [];
+    value.forEach((element, i) => (result[i] = merge(result[i], element, fieldSetReplaces)));
+    return result;
+  }
+  if (isPlain(value)) {
+    const result: Doc = isPlain(stored) ? { ...stored } : {};
+    for (const [key, inner] of Object.entries(value)) result[key] = merge(result[key], inner, fieldSetReplaces);
+    return result;
+  }
+  return value;
+}
+
+/** A PUT (or a create into an empty record). `$app.<id>.$set` replaces those app fields. */
 function applyPatch(doc: Doc, patch: Doc): Doc {
   for (const [key, value] of Object.entries(patch)) {
     if (key === '$app') {
-      // Like the platform: $app writes merge per app.
       doc.$app ??= {};
-      for (const [appId, fields] of Object.entries<Doc>(value)) doc.$app[appId] = { ...doc.$app[appId], ...fields };
+      for (const [appId, fields] of Object.entries<Doc>(value)) {
+        const { $set: replace, ...rest } = fields;
+        const merged = merge(doc.$app[appId], rest, false) as Doc;
+        doc.$app[appId] = replace ? { ...merged, ...structuredClone(replace) } : merged;
+      }
       continue;
     }
-    doc[key] = value && typeof value === 'object' && !Array.isArray(value) && '$set' in value ? value.$set : value;
+    if (key.startsWith('$')) throw new Error(`the fake store does not model ${key}`);
+    doc[key] = merge(doc[key], value, true);
   }
   return doc;
 }

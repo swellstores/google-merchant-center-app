@@ -56,6 +56,25 @@ describe('the fake store', () => {
     await expect(swell.post('/sync-states', { quota: { $set: {} } })).rejects.toThrow('operators are for updates');
   });
 
+  it('merges a plain update like the platform: objects at every depth, arrays by position', async () => {
+    const { swell, collections } = createFakeSwell({ products: [{ id: 'p1', tags: ['new', 'summer', 'x'], dims: { w: 1, h: 2 }, $app: { gmc: { input_ids: ['a', 'b'], sync_state: 'sent' } } }] });
+    await swell.put('/products/p1', { tags: ['sale'], dims: { w: 3 } });
+    await swell.put('/products/p1', { tags: [] });
+    expect(collections['/products'][0]).toMatchObject({ tags: ['sale', 'summer', 'x'], dims: { w: 3, h: 2 } });
+    await swell.put('/products/p1', { tags: { $set: ['only'] } });
+    expect(collections['/products'][0].tags).toEqual(['only']);
+  });
+
+  it('replaces app fields only with $set inside the app’s object', async () => {
+    const { swell, collections } = createFakeSwell({ products: [{ id: 'p1', $app: { gmc: { input_ids: ['a', 'b'], sync_state: 'sent' } } }] });
+    await swell.put('/products/p1', { $app: { gmc: { input_ids: { $set: [] } } } });
+    expect(collections['/products'][0].$app.gmc.input_ids).toEqual(['a', 'b']);
+    await swell.put('/products/p1', { $app: { gmc: { input_ids: ['c'] } } });
+    expect(collections['/products'][0].$app.gmc.input_ids).toEqual(['c', 'b']);
+    await swell.put('/products/p1', { $app: { gmc: { sync_state: 'skipped', $set: { input_ids: [] } } } });
+    expect(collections['/products'][0].$app.gmc).toEqual({ input_ids: [], sync_state: 'skipped' });
+  });
+
   it('creates a record on a PUT to an id that does not exist', async () => {
     const { swell, collections } = createFakeSwell();
     await swellBatch(swell, [{ method: 'put', url: '/alarms/a1', data: { wake_at: null } }]);

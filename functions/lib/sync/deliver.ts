@@ -255,7 +255,9 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[], read?: Map<st
     }
     report.done.push(plan.unit);
     if (plan.product && settled.fields) {
-      env.outbox.add({ method: 'put', url: `/products/${plan.product.id}`, data: { $app: { [env.ctx.appId]: settled.fields } } });
+      // `$set` inside the app's object replaces the list; any other form merges it by position.
+      const { input_ids, ...fields } = settled.fields;
+      env.outbox.add({ method: 'put', url: `/products/${plan.product.id}`, data: { $app: { [env.ctx.appId]: { ...fields, $set: { input_ids } } } } });
     }
   }
   // A part was rate limited or failed on Google's side: the courier settles what it has and backs off.

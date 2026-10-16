@@ -188,6 +188,15 @@ describe('settleQueue', () => {
     expect(listOf<QueueItem>(answer, 'the queue').map((item) => item.product_id)).toEqual(['p2', 'p3']);
   });
 
+  it('replaces a kept item’s arrays instead of merging them by position', async () => {
+    const { swell, collections } = createFakeSwell();
+    // A list written twice over, the shape a by-position merge leaves behind.
+    collections['/queue-items'].push({ id: 'a', product_id: 'p1', kind: 'full', input_ids: ['en~US~p1', 'en~US~p1'], done_input_ids: ['x', 'x'], attempts: 0, revision: 0 });
+    const [unit] = unitsFromQueue(await takeQueue(swell, 10));
+    await settleQueue(testContext(swell), [], [{ ...unit, error: 'rate limited' }]);
+    expect(collections['/queue-items'][0]).toMatchObject({ input_ids: ['en~US~p1'], done_input_ids: ['x'] });
+  });
+
   it('keeps the input ids of a kept unit\'s duplicates', async () => {
     const { swell, collections } = createFakeSwell();
     collections['/queue-items'].push(
