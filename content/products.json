@@ -67,7 +67,7 @@
           "id": "google",
           "label": "Google",
           "fields": [
-            { "id": "status", "type": "component", "component": "GoogleStatus", "label": "Google status" },
+            { "id": "status_panel", "type": "component", "component": "GoogleStatus", "label": "Google status" },
             { "id": "preview", "type": "component", "component": "ShoppingPreview", "label": "Shopping preview" },
             { "id": "excluded" },
             { "type": "field_row", "fields": [{ "id": "brand" }, { "id": "mpn" }] },

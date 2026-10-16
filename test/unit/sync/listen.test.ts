@@ -37,6 +37,13 @@ describe('planFromEvent', () => {
     expect(planFromEvent(APP, ev('product.updated', data), { id: 'p1' })).toBeNull();
   });
 
+  it('writes of the panel fields do not queue the product', () => {
+    const write = (fields: Record<string, unknown>) => planFromEvent(APP, ev('product.updated', { $app: { [APP]: fields } }), { id: 'p1' });
+    expect(write({ status_panel: null })).toBeNull();
+    expect(write({ preview: null })).toBeNull();
+    expect(write({ status_panel: 'x', preview: 'y' })).toBeNull();
+  });
+
   it('ignores changes Google never sees', () => {
     expect(planFromEvent(APP, ev('product.updated', { date_updated: 'x', meta_title: 'y' }), { id: 'p1' })).toBeNull();
     expect(planFromEvent(APP, ev('product.updated', { $app: { other_app: { x: 1 } } }), { id: 'p1' })).toBeNull();
