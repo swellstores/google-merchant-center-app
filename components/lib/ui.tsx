@@ -6,7 +6,7 @@ export type Tone = 'ok' | 'bad' | 'info' | 'neutral';
 
 const CSS = `
 .gmc {
-  --text: #1f2937; --muted: #6b7280; --border: #d1d5db;
+  --text: #1f2937; --muted: #5f6672; --border: #d1d5db;
   --surface: #ffffff; --field: #ffffff; --subtle: #f3f4f6;
   --accent: #2563eb; --accent-text: #ffffff;
   --ok: #047857; --ok-bg: #ecfdf5;
@@ -70,6 +70,7 @@ const CSS = `
 .gmc-drop:hover, .gmc-drop.over { border-color: var(--accent); }
 .gmc-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip-path: inset(50%); }
 .gmc details > summary { cursor: pointer; color: var(--accent); }
+.gmc-guide { display: block; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 .gmc-guide > summary { font-weight: 600; font-size: 16px; color: var(--text); }
 .gmc-guide[open] > summary { margin-bottom: 12px; }
 .gmc-steps { display: flex; flex-direction: column; gap: 12px; }
@@ -143,19 +144,21 @@ export function ExternalLink({ href, children }: { href: string; children: Compo
 
 /** One setup step: a number (or ✓ / ✕ after a check), a title, a description and the controls. */
 export function Step(props: {
-  number: number;
+  number?: number;
   title: string;
   status: 'idle' | 'ok' | 'failed';
   problems: { id: string; message: string; help?: string }[];
   children: ComponentChildren;
 }) {
-  const badge = props.status === 'ok' ? '✓' : props.status === 'failed' ? '✕' : String(props.number);
+  const badge = props.number === undefined ? null : props.status === 'ok' ? '✓' : props.status === 'failed' ? '✕' : String(props.number);
   return (
     <div class="gmc-card">
       <div class="gmc-row">
-        <span class={cx('gmc-badge', props.status === 'ok' && 'ok', props.status === 'failed' && 'bad')} aria-hidden="true">
-          {badge}
-        </span>
+        {badge && (
+          <span class={cx('gmc-badge', props.status === 'ok' && 'ok', props.status === 'failed' && 'bad')} aria-hidden="true">
+            {badge}
+          </span>
+        )}
         <div class="gmc-body">
           <h3 class="gmc-title">{props.title}</h3>
           {props.children}

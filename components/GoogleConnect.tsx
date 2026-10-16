@@ -244,7 +244,7 @@ export default function GoogleConnect(props: ComponentProps) {
   );
 
   const connectStep = (
-    <Step number={4} title={connected ? 'Connection settings' : 'Connect'} {...states.connect}>
+    <Step number={connected ? undefined : 4} title={connected ? 'Connection settings' : 'Connect'} {...states.connect}>
       <div class="gmc-grid">
         <Label text="Merchant Center account ID">
           <input class="gmc-input" value={merchantId} inputMode="numeric" onInput={(event) => setMerchantId(value(event))} />
@@ -316,7 +316,7 @@ export default function GoogleConnect(props: ComponentProps) {
 
       {connected ? (
         <>
-          <details class="gmc-guide gmc-card">
+          <details class="gmc-guide" open={failedCheck}>
             <summary>Setup guide</summary>
             {guide}
           </details>
