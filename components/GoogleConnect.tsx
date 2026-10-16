@@ -200,6 +200,7 @@ export default function GoogleConnect(props: ComponentProps) {
         <span class="gmc-muted">
           Verify and claim your website (Settings → Business info → Website), then add the service account in Settings → People and access with Admin access.
         </span>
+        <span class="gmc-muted">Set up shipping in Settings → Shipping and returns; without it Google disapproves every product.</span>
         <div class="gmc-links">
           <ExternalLink href="https://merchants.google.com/">Merchant Center</ExternalLink>
         </div>

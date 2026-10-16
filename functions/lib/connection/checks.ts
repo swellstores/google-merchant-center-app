@@ -1,5 +1,5 @@
 import type { AppContext } from '../context';
-import { GoogleApiError, googleCall } from '../google/http';
+import { errorReasons, GoogleApiError, googleCall } from '../google/http';
 import type { ServiceAccountKey } from '../google/jwt';
 import { getAccount, getHomepage, registerGcp } from '../google/merchant';
 import { fetchAccessToken, type AccessToken } from '../google/token';
@@ -20,6 +20,10 @@ export interface CheckReport {
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+// Google refuses a fresh registration for about five minutes (spike 3).
+const activating = (error: GoogleApiError) => error.status === 401 && errorReasons(error.body).includes('GCP_NOT_REGISTERED');
+const ACTIVATING = 'Google is activating the registration of your Google Cloud project.';
+const ACTIVATING_HELP = 'This takes up to 5 minutes. Press Check again in a few minutes.';
 
 /** Every step a merchant can get wrong, in the order Google needs them. Stops at the first failure. */
 export async function runChecks(
@@ -42,11 +46,19 @@ export async function runChecks(
   }
   checks.push({ id: 'token', ok: true, message: 'Google accepted the key' });
 
+  // Google answers a repeated registration with 200 again; older answers said 409.
   let registeredBefore = false;
   try {
     await googleCall(ctx.fetch, token.token, registerGcp(merchantId));
   } catch (error) {
     if (!(error instanceof GoogleApiError)) throw error;
+    if (errorReasons(error.body).includes('HOMEPAGE_NOT_VERIFIED')) {
+      return fail(
+        'homepage',
+        'Your website is not verified in Merchant Center.',
+        'In Merchant Center, open Settings → Business info → Website, verify and claim it, then press Check again.',
+      );
+    }
     if (error.kind === 'conflict' || /already/i.test(error.message)) registeredBefore = true;
     else if (error.kind === 'auth') return fail('registration', `Google refused to register the project: ${error.message}`, adminHelp);
     else return fail('registration', `Google could not register the project: ${error.message}`);
@@ -58,6 +70,7 @@ export async function runChecks(
     account = await googleCall(ctx.fetch, token.token, getAccount(merchantId));
   } catch (error) {
     if (!(error instanceof GoogleApiError)) throw error;
+    if (!registeredBefore && activating(error)) return fail('account', ACTIVATING, ACTIVATING_HELP);
     if (registeredBefore && error.kind === 'auth') {
       return fail(
         'account',
@@ -74,6 +87,7 @@ export async function runChecks(
     homepage = await googleCall(ctx.fetch, token.token, getHomepage(merchantId));
   } catch (error) {
     if (!(error instanceof GoogleApiError)) throw error;
+    if (!registeredBefore && activating(error)) return fail('homepage', ACTIVATING, ACTIVATING_HELP);
     return fail('homepage', `The account's website could not be read: ${error.message}`);
   }
   if (!homepage.claimed) {

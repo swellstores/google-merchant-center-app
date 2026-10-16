@@ -67,4 +67,57 @@ describe('runChecks', () => {
     expect(report.ok).toBe(false);
     expect(report.checks.at(-1)).toMatchObject({ id: 'homepage', ok: false });
   });
+
+  it('accepts a project registered before, which Google answers with 200 again', async () => {
+    const google = createFakeGoogle();
+    const ctx = testContext(createFakeSwell().swell, google.fetch);
+    await runChecks(ctx, key, '123');
+    expect((await runChecks(ctx, key, '123')).report.ok).toBe(true);
+  });
+
+  it.each([
+    ['reason', { reason: 'HOMEPAGE_NOT_VERIFIED', metadata: { REASON: 'HOMEPAGE_NOT_VERIFIED' } }],
+    ['metadata.REASON', { metadata: { REASON: 'HOMEPAGE_NOT_VERIFIED' } }],
+  ])('explains a website Google has not verified when registering (%s)', async (_shape, detail) => {
+    const { report } = await check({
+      register: {
+        status: 400,
+        body: { error: { code: 400, message: 'The Merchant Account used for developer registration must have a verified homepage', status: 'FAILED_PRECONDITION', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', ...detail }] } },
+      },
+    });
+    expect(report.ok).toBe(false);
+    expect(report.checks.at(-1)).toEqual({
+      id: 'homepage',
+      ok: false,
+      message: 'Your website is not verified in Merchant Center.',
+      help: 'In Merchant Center, open Settings → Business info → Website, verify and claim it, then press Check again.',
+    });
+  });
+
+  const notRegistered = {
+    status: 401,
+    body: {
+      error: {
+        code: 401,
+        message: 'GCP project is not registered with the merchant account. Try again in 5 minutes.',
+        status: 'UNAUTHENTICATED',
+        details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'GCP_NOT_REGISTERED', metadata: { REASON: 'GCP_NOT_REGISTERED' } }],
+      },
+    },
+  };
+  const activating = {
+    ok: false,
+    message: 'Google is activating the registration of your Google Cloud project.',
+    help: 'This takes up to 5 minutes. Press Check again in a few minutes.',
+  };
+
+  it('says Google is still activating a fresh registration when the account answers so', async () => {
+    const { report } = await check({ account: notRegistered });
+    expect(report.checks.at(-1)).toEqual({ id: 'account', ...activating });
+  });
+
+  it('says Google is still activating a fresh registration when the website answers so', async () => {
+    const { report } = await check({ homepageError: notRegistered });
+    expect(report.checks.at(-1)).toEqual({ id: 'homepage', ...activating });
+  });
 });

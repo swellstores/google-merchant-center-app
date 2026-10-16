@@ -29,9 +29,15 @@ function setup(status = 'connected', googleOptions: FakeGoogleOptions = {}, conn
 }
 
 describe('quotaFromGroups', () => {
-  it('reads the limits of the product insert group', () => {
+  it('reads the limits of the product insert group among the others', () => {
+    expect(DEFAULT_QUOTA.quotaGroups.length).toBeGreaterThan(1);
     expect(quotaFromGroups(DEFAULT_QUOTA)).toEqual({ minute_limit: 300, daily_limit: 5000 });
     expect(quotaFromGroups({})).toEqual({ minute_limit: null, daily_limit: null });
+  });
+
+  it('knows the group by its name when the methods are missing', () => {
+    const group = { name: 'accounts/1/quotas/merchant-productinputs-insert', quotaLimit: '10', quotaMinuteLimit: '2' };
+    expect(quotaFromGroups({ quotaGroups: [group] })).toEqual({ minute_limit: 2, daily_limit: 10 });
   });
 });
 

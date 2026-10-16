@@ -42,6 +42,13 @@ export function errorMessage(body: unknown, status: number): string {
   return message || `Google responded ${status}`;
 }
 
+/** The reasons Google gives in an error's details, e.g. `GCP_NOT_REGISTERED`. */
+export function errorReasons(body: unknown): string[] {
+  const details = (body as { error?: { details?: { reason?: string; metadata?: { REASON?: string } }[] } } | null)?.error?.details;
+  if (!Array.isArray(details)) return [];
+  return details.flatMap((detail) => [detail?.reason, detail?.metadata?.REASON]).filter((reason): reason is string => typeof reason === 'string');
+}
+
 export function safeJson(text: string): unknown {
   try {
     return JSON.parse(text);

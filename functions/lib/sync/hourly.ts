@@ -13,6 +13,7 @@ export const STALL_MS = 5 * 60_000;
 export const QUOTA_TTL_MS = 24 * 3600_000;
 
 interface QuotaGroup {
+  name?: string;
   quotaLimit?: string | number;
   quotaMinuteLimit?: string | number;
   methodDetails?: { method?: string; path?: string }[];
@@ -20,8 +21,14 @@ interface QuotaGroup {
 
 const toNumber = (value: unknown) => (value === undefined || value === null || value === '' ? null : Number(value));
 
+// `productinputsservice.insertproductinput` in Google's answer, `productinputs.insert` in its docs.
+const INSERT_METHOD = /productinputs(?:service)?\.insert/i;
+
+/** The limits of the group that counts product inserts, `accounts/{a}/quotas/merchant-productinputs-insert`. */
 export function quotaFromGroups(body: { quotaGroups?: QuotaGroup[] }): { minute_limit: number | null; daily_limit: number | null } {
-  const group = body.quotaGroups?.find((g) => g.methodDetails?.some((m) => /productinputs\.insert/i.test(`${m.method ?? ''} ${m.path ?? ''}`)));
+  const group = body.quotaGroups?.find(
+    (g) => /\/merchant-productinputs-insert$/.test(g.name ?? '') || g.methodDetails?.some((m) => INSERT_METHOD.test(`${m.method ?? ''} ${m.path ?? ''}`)),
+  );
   return { minute_limit: toNumber(group?.quotaMinuteLimit), daily_limit: toNumber(group?.quotaLimit) };
 }
 

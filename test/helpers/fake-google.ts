@@ -9,6 +9,8 @@ export interface FakeGoogleOptions {
   register?: Reply;
   account?: Reply;
   homepage?: { uri?: string; claimed: boolean };
+  /** Replaces the homepage answer, e.g. a 401 */
+  homepageError?: Reply;
   /** Replaces the whole batch answer, e.g. a 429 */
   batch?: Reply;
   /** Per-offer answer for insert, patch and delete */
@@ -16,14 +18,29 @@ export interface FakeGoogleOptions {
   quota?: Json;
 }
 
+/** The shape Google answers with (spike 3): one group per method, the insert group among them. */
 export const DEFAULT_QUOTA = {
   quotaGroups: [
     {
-      name: 'accounts/123/quotas/products-insert',
+      name: 'accounts/123/quotas/merchant-products-get',
+      quotaUsage: '0',
+      quotaLimit: '7000000',
+      quotaMinuteLimit: '7000',
+      methodDetails: [{ method: 'productsservice.getproduct', version: 'v1', subapi: 'products', path: 'products/v1/productsservice.getproduct' }],
+    },
+    {
+      name: 'accounts/123/quotas/merchant-productinputs-delete',
+      quotaUsage: '3',
+      quotaLimit: '9000',
+      quotaMinuteLimit: '900',
+      methodDetails: [{ method: 'productinputsservice.deleteproductinput', version: 'v1', subapi: 'products', path: 'products/v1/productinputsservice.deleteproductinput' }],
+    },
+    {
+      name: 'accounts/123/quotas/merchant-productinputs-insert',
       quotaUsage: '10',
       quotaLimit: '5000',
       quotaMinuteLimit: '300',
-      methodDetails: [{ method: 'productinputs.insert', version: 'v1', subapi: 'products', path: 'products/v1/productInputs.insert' }],
+      methodDetails: [{ method: 'productinputsservice.insertproductinput', version: 'v1', subapi: 'products', path: 'products/v1/productinputsservice.insertproductinput' }],
     },
   ],
 };
@@ -75,6 +92,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}) {
       return options.register ?? { status: 200, body: { name: `accounts/${m[1]}/developerRegistration` } };
     }
     if ((m = path.match(/^\/accounts\/v1\/accounts\/(\d+)\/homepage$/))) {
+      if (options.homepageError) return options.homepageError;
       return {
         status: 200,
         body: { name: `accounts/${m[1]}/homepage`, uri: options.homepage?.uri ?? 'https://shop.example.com', claimed: options.homepage?.claimed ?? true },
