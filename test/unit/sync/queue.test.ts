@@ -149,6 +149,27 @@ describe('settleQueue', () => {
     expect(collections['/products'][0].$app[APP_ID]).toMatchObject({ sync_state: 'error', sync_error: 'Google kept failing' });
   });
 
+  it('hands a gone product’s kept update to a new delete item that loses no id', async () => {
+    const { swell, collections } = createFakeSwell();
+    collections['/queue-items'].push(
+      { id: 'a', product_id: 'p1', kind: 'full', input_ids: ['en~US~old'], done_input_ids: ['en~US~v1', 'en~US~v2'], revision: 0, attempts: 0, date_created: '2026-01-01T00:00:00.000Z' },
+      { id: 'b', product_id: 'p1', kind: 'light', input_ids: [], done_input_ids: ['en~US~v1'], revision: 0, attempts: 0, date_created: '2026-01-02T00:00:00.000Z' },
+    );
+    const [unit] = unitsFromQueue(await takeQueue(swell, 10));
+    // Item b changes during the run: it stays, and the next run merges it with the delete.
+    collections['/queue-items'][1] = { ...collections['/queue-items'][1], revision: 1, input_ids: ['en~US~v9'] };
+    const ctx = testContext(swell);
+    const [current] = await swellBatch(swell, [itemsRead(unit.queueItemIds)]);
+    const { writes } = settleWrites(ctx, [], [{ ...unit, gone: true, progress: ['en~US~old'] }], listOf<QueueItem>(current, 'the queue'));
+    await swellBatch(swell, writes);
+    expect(collections['/queue-items'].map((i) => [i.id === 'b' ? 'b' : i.kind, i.input_ids, i.done_input_ids])).toEqual([
+      ['b', ['en~US~v9'], ['en~US~v1']],
+      ['delete', ['en~US~old', 'en~US~v1', 'en~US~v2', 'en~US~v9'], ['en~US~old']],
+    ]);
+    const [next] = unitsFromQueue(await takeQueue(swell, 10));
+    expect(next).toMatchObject({ kind: 'delete', inputIds: expect.arrayContaining(['en~US~old', 'en~US~v1', 'en~US~v2', 'en~US~v9']) });
+  });
+
   it('gives up on a delete without writing to the deleted product', async () => {
     const { swell, collections } = createFakeSwell();
     await enqueue(swell, { productId: 'gone', kind: 'delete', inputIds: ['en~US~gone'] });

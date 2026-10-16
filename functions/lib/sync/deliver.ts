@@ -259,6 +259,7 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[], read?: Map<st
         error: settled.error ?? null,
         progress: settled.progress,
         charge: settled.charge,
+        gone: !plan.product && plan.unit.kind !== 'delete',
       });
       continue;
     }

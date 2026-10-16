@@ -34,6 +34,8 @@ export interface WorkUnit {
   progress?: string[];
   /** A part got a server error: the run counts as an attempt. Rate limits never do. */
   charge?: boolean;
+  /** An update whose product is gone: what it lists and sent is deleted, and a kept one goes on as a delete. */
+  gone?: boolean;
 }
 
 export const MAX_ATTEMPTS = 8;
@@ -173,13 +175,35 @@ export function settleWrites(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]
     const attempts = progressed ? 0 : unit.charge ? unit.attempts + 1 : unit.attempts;
     if (attempts >= MAX_ATTEMPTS) {
       removed.push(...ids.filter((id) => unchanged(unit, id)));
-      // A deleted product is gone: a PUT would create it again.
-      if (unit.kind === 'delete') continue;
+      // A deleted product is gone: there is nothing to tell it.
+      if (unit.kind === 'delete' || unit.gone) continue;
       writes.push({
         method: 'put',
         url: `/products/${unit.productId}`,
         data: { $app: { [ctx.appId]: { sync_state: 'error', sync_error: unit.error ?? 'Google did not accept the product', date_synced: iso(ctx.now()) } } },
       });
+      continue;
+    }
+    if (unit.gone) {
+      // Its done ids were upserts, so every run would delete them again from
+      // the start. A new delete item takes over, done meaning deleted; no
+      // other writer knows its id. The items it replaces go unless edited.
+      const all = new Set(unit.inputIds);
+      for (const id of ids) [...(current.get(id)!.input_ids ?? []), ...(current.get(id)!.done_input_ids ?? [])].forEach((inputId) => all.add(inputId));
+      writes.push({
+        method: 'post',
+        url: COLLECTION,
+        data: {
+          product_id: unit.productId,
+          kind: 'delete',
+          input_ids: [...all],
+          done_input_ids: [...new Set(unit.progress ?? [])],
+          attempts,
+          revision: 0,
+          last_error: unit.error ?? null,
+        },
+      });
+      removed.push(...ids.filter((id) => unchanged(unit, id)));
       continue;
     }
     // A delete's own item survives, as it was written; the items it covers go.

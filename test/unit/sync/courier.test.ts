@@ -233,6 +233,25 @@ describe('runCourier', () => {
     expect(collections['/queue-items']).toEqual([]);
   });
 
+  it('finishes deleting a gone product’s update with more offers than a run can send', async () => {
+    const { swell, collections, google } = await steady([]);
+    const ids = Array.from({ length: 150 }, (_, i) => `en~US~v${i}`);
+    // 100 offers sent in this revision, 50 listed from before; then the product was deleted.
+    collections['/queue-items'].push({ id: 'a', product_id: 'p1', kind: 'full', input_ids: ids.slice(100), done_input_ids: ids.slice(0, 100), revision: 0, attempts: 0 });
+    ids.forEach((id) => google.inputs.set(`${DS}|${id}`, {}));
+    let runs = 0;
+    // At 1.3 s a Swell round trip and 1.5 s a Google call one batch of 100 fits in a run.
+    while (collections['/queue-items'].length && runs < 6) {
+      const slow = slowServices(swell, google.fetch, { swellMs: 1300, googleMs: 1500 }, NOW + runs * 600_000);
+      await runCourier(testContext(slow.swell, slow.fetch, slow.now));
+      runs++;
+    }
+    expect(google.batches()).toBe(runs);
+    expect(google.inputs.size).toBe(0);
+    expect(collections['/queue-items']).toEqual([]);
+    expect(runs).toBe(2);
+  });
+
   it('deletes every offer of a product deleted with its variants in one burst', async () => {
     const tee = {
       ...MUG,
