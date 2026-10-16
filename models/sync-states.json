@@ -2,7 +2,7 @@
   "$schema": "https://json.swell.store/model.json",
   "collection": "sync-states",
   "label": "Google sync state",
-  "description": "The courier's running mark, back-off, catalog sync job and Merchant API quota. One record per store.",
+  "description": "The courier's running mark, back-off, catalog sync and status refresh jobs, status summary and Merchant API quota. One record per store.",
   "fields": {
     "running_since": { "type": "date" },
     "run_seq": { "type": "int", "default": 0, "description": "Bumped atomically by every run's mark: of runs that start together, only the one that gets the next number works" },
@@ -27,6 +27,49 @@
         "daily_limit": { "type": "int" },
         "date_checked": { "type": "date" },
         "exhausted_until": { "type": "date" }
+      }
+    },
+    "status_refresh": {
+      "type": "object",
+      "fields": {
+        "status": { "type": "string", "enum": ["running", "done"] },
+        "cursor": { "type": "string" },
+        "checked": { "type": "int" },
+        "requeued": { "type": "int" },
+        "counters": {
+          "type": "object",
+          "fields": {
+            "approved": { "type": "int" },
+            "partial": { "type": "int" },
+            "pending": { "type": "int" },
+            "disapproved": { "type": "int" },
+            "not_sent": { "type": "int" },
+            "excluded": { "type": "int" }
+          }
+        },
+        "issues": { "type": "array", "value_type": "object", "description": "Issue tallies by code: severity, description, documentation, products and sample products" },
+        "date_started": { "type": "date" },
+        "date_finished": { "type": "date" },
+        "duration_ms": { "type": "int" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "description": "The last finished status refresh",
+      "fields": {
+        "counters": {
+          "type": "object",
+          "fields": {
+            "approved": { "type": "int" },
+            "partial": { "type": "int" },
+            "pending": { "type": "int" },
+            "disapproved": { "type": "int" },
+            "not_sent": { "type": "int" },
+            "excluded": { "type": "int" }
+          }
+        },
+        "top_issues": { "type": "array", "value_type": "object" },
+        "date_refreshed": { "type": "date" }
       }
     }
   }

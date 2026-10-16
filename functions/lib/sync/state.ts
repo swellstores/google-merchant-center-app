@@ -1,3 +1,4 @@
+import type { StatusRefreshJob, StatusSummary } from '../status/refresh';
 import type { BatchOp } from '../swell-batch';
 import { iso } from '../time';
 
@@ -27,6 +28,9 @@ export interface SyncState {
   last_error?: string | null;
   full_sync?: FullSyncJob | null;
   quota?: QuotaInfo | null;
+  status_refresh?: StatusRefreshJob | null;
+  /** The last finished status refresh */
+  summary?: StatusSummary | null;
 }
 
 const COLLECTION = '/sync-states';

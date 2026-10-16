@@ -15,8 +15,8 @@ export const pageRead = (job: FullSyncJob): BatchOp => ({
   data: { ...(job.cursor ? { where: { id: { $gt: job.cursor } } } : {}), sort: 'id asc', limit: JOB_PAGE, expand: ['variants:1000'] },
 });
 
-export interface PassResult {
-  job: FullSyncJob;
+export interface PassResult<J> {
+  job: J;
   sentOps: number;
   failure?: GoogleApiError;
   progressed: boolean;
@@ -38,7 +38,7 @@ export interface PassResult {
  * answer sends the writes and reads what the hand-off needs along with the
  * caller's `reads`; the hand-off waits in `env.outbox`.
  */
-export async function fullSyncPass(env: DeliveryEnv, job: FullSyncJob, reads: BatchOp[] = [], page?: unknown): Promise<PassResult> {
+export async function fullSyncPass(env: DeliveryEnv, job: FullSyncJob, reads: BatchOp[] = [], page?: unknown): Promise<PassResult<FullSyncJob>> {
   const answer = page === undefined ? (await env.outbox.send([pageRead(job)]))[0] : page;
   const products = listOf<SwellProduct>(answer, 'the catalog page');
   const total = job.cursor === null && !job.total ? countOf(answer) : job.total;
