@@ -89,7 +89,8 @@ function severityOf(google: string | undefined, resolution: string | undefined):
 
 const byCode = (a: StatusIssue, b: StatusIssue) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0);
 
-export function groupIssues(answers: OfferAnswer[]): StatusIssue[] {
+/** `missing: false` leaves out the issue of offers Google does not hold, for a product just sent. */
+export function groupIssues(answers: OfferAnswer[], missing = true): StatusIssue[] {
   const groups = new Map<string, StatusIssue>();
   const add = (code: string, severity: StatusIssue['severity'], inputId: string, countries: string[], from: Partial<StatusIssue>) => {
     let issue = groups.get(code);
@@ -106,9 +107,11 @@ export function groupIssues(answers: OfferAnswer[]): StatusIssue[] {
 
   for (const answer of answers) {
     if (!answer.found) {
-      add(MISSING_ISSUE, 'info', answer.inputId, [], {
-        description: 'Google has not processed this offer yet, or it was removed in Merchant Center',
-      });
+      if (missing) {
+        add(MISSING_ISSUE, 'info', answer.inputId, [], {
+          description: 'Google has not processed this offer yet, or it was removed in Merchant Center',
+        });
+      }
       continue;
     }
     for (const item of answer.status?.itemLevelIssues ?? []) {
@@ -142,13 +145,13 @@ function build(status: StatusValue, label: string, issues: StatusIssue[]): Produ
   return { status, label, issues, hash: fnv1a(digest) };
 }
 
-export function productStatus(answers: OfferAnswer[]): ProductStatus {
+export function productStatus(answers: OfferAnswer[], { missing = true }: { missing?: boolean } = {}): ProductStatus {
   const statuses = answers.map(offerStatus);
   const worst = statuses.reduce<OfferStatus>((a, b) => (BADNESS[b] > BADNESS[a] ? b : a), 'approved');
   const count = statuses.filter((s) => s === worst).length;
   const overall: OfferStatus = statuses.length ? worst : 'pending';
   const label = statuses.length && count < statuses.length ? `${LABELS[overall]} (${count} of ${statuses.length})` : LABELS[overall];
-  return build(overall, label, groupIssues(answers));
+  return build(overall, label, groupIssues(answers, missing));
 }
 
 export function skippedStatus(reason: SkipReason): ProductStatus {

@@ -124,10 +124,13 @@ function offerAnswer(inputId: string, result: BatchResult | undefined): OfferAns
   return { inputId, found: false };
 }
 
+/** Sent less than `MISSING_RESEND_MS` ago: Google may not have processed it yet. */
+const justSent = (fields: GoogleFields, now: number) => Date.parse(fields.date_synced ?? '') > now - MISSING_RESEND_MS;
+
 function resendDue(offers: OfferAnswer[], fields: GoogleFields, now: number): boolean {
   const expiry = earliestExpiry(offers);
   if (expiry !== null && expiry < now + EXPIRY_MARGIN_MS) return true;
-  return offers.every((offer) => !offer.found) && !(Date.parse(fields.date_synced ?? '') > now - MISSING_RESEND_MS);
+  return offers.every((offer) => !offer.found) && !justSent(fields, now);
 }
 
 function tally(tallies: IssueTally[], product: SwellProduct, issues: StatusIssue[]): void {
@@ -213,7 +216,8 @@ export async function statusRefreshPass(
     } else {
       if (checks[i].some((check) => check instanceof GoogleApiError)) break;
       const offers = checks[i] as OfferAnswer[];
-      const status = productStatus(offers);
+      // An offer just sent that Google does not hold yet is plain pending: no issue, no write.
+      const status = productStatus(offers, { missing: !justSent(fields, now) });
       const resend = resendDue(offers, fields, now);
       const ops: BatchOp[] = [];
       if (status.hash !== fields.status_hash) {

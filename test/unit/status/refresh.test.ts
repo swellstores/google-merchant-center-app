@@ -149,7 +149,7 @@ describe('status refresh pass', () => {
 
   it('a product with a missing offer is pending with the missing issue', async () => {
     const offers = ['en~US~x', 'en~GB~x'];
-    const { env, google, collections } = setup([product(1, 0, { input_ids: offers })], { statuses: { 'en~US~x': approved() } });
+    const { env, google, collections } = setup([product(1, 0, { input_ids: offers, date_synced: iso(NOW - 2 * DAY) })], { statuses: { 'en~US~x': approved() } });
     google.inputs.delete(`${DS}|en~GB~x`);
     const pass = await statusRefreshPass(env, newStatusRefreshJob(NOW));
     expect(pass.failure).toBeUndefined();
@@ -159,6 +159,15 @@ describe('status refresh pass', () => {
       status_issues: [expect.objectContaining({ code: 'missing_in_google', severity: 'info', offers: ['en~GB~x'] })],
     });
     expect(pass.job).toMatchObject({ requeued: 0, counters: { pending: 1, approved: 0 } });
+  });
+
+  it('a just-sent offer Google has not processed is pending without an issue', async () => {
+    const { env, google, swell } = setup([product(1), product(2, 2)]);
+    google.inputs.delete(`${DS}|${offerOf(1)}`);
+    google.inputs.delete(`${DS}|${offerOf(2, 1)}`);
+    const pass = await statusRefreshPass(env, newStatusRefreshJob(NOW));
+    expect(productPuts(swell)).toEqual([]);
+    expect(pass.job).toMatchObject({ checked: 2, requeued: 0, counters: { pending: 2 }, issues: [] });
   });
 
   it('a product without offers counts its stored status without Google', async () => {
