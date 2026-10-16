@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppContext } from '../../../functions/lib/context';
 import { listOf, swellBatch } from '../../../functions/lib/swell-batch';
 import {
-  clearQueue,
   enqueue,
   itemsRead,
   MAX_ATTEMPTS,
@@ -212,36 +211,4 @@ describe('settleQueue', () => {
     expect(collections['/queue-items'][0].input_ids).toEqual(['en~US~p1']);
   });
 
-  it('clears everything', async () => {
-    const { swell } = createFakeSwell();
-    await enqueue(swell, { productId: 'p1', kind: 'full' });
-    await enqueue(swell, { productId: 'p2', kind: 'full' });
-    await clearQueue(swell);
-    expect(await queueCount(swell)).toBe(0);
-  });
-
-  it('clears in one batch per chunk', async () => {
-    const { swell } = createFakeSwell();
-    for (const id of ['p1', 'p2', 'p3']) await enqueue(swell, { productId: id, kind: 'full' });
-    swell.post.mockClear();
-    await clearQueue(swell);
-    expect(batchesOf(swell).map((batch) => batch.length)).toEqual([3]);
-    expect(swell.delete).not.toHaveBeenCalled();
-  });
-
-  it('stops clearing when deletes keep failing', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const { swell, collections, refuse } = createFakeSwell();
-    await enqueue(swell, { productId: 'p1', kind: 'full' });
-    refuse((method) => (method === 'delete' ? 'denied' : null));
-    // Guard: a looping clearQueue fails here instead of spinning forever.
-    const realGet = swell.get.getMockImplementation()!;
-    let reads = 0;
-    swell.get.mockImplementation(async (...args: any[]) => {
-      if (++reads > 50) throw new Error('clearQueue never stopped');
-      return realGet(...(args as [string, object]));
-    });
-    await clearQueue(swell);
-    expect(collections['/queue-items']).toHaveLength(1);
-  });
 });

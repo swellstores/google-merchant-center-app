@@ -26,10 +26,7 @@ export async function post(req: SwellRequest) {
     if (body.op === 'activate') {
       return await activate(ctx, { country: text(body.country) ?? '', link_template: text(body.link_template) ?? '' });
     }
-    if (body.op === 'disconnect') {
-      await disconnect(ctx, body.remove_products === true);
-      return await connectionStatus(ctx);
-    }
+    if (body.op === 'disconnect') return await disconnect(ctx, body.remove_products === true);
     throw new AppError('unknown_op', 'Unknown operation');
   } catch (error) {
     return errorResponse(error);

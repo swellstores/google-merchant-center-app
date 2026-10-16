@@ -7,7 +7,7 @@ import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
 import { loadAlarm, setAlarm } from '../../../functions/lib/sync/alarm';
 import { enqueue, queueCount } from '../../../functions/lib/sync/queue';
 import { loadState, saveState } from '../../../functions/lib/sync/state';
-import { fixedClock, NOW, testContext } from '../../helpers/context';
+import { fixedClock, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
 import { makeServiceAccountKey } from '../../helpers/keys';
@@ -281,10 +281,17 @@ describe('disconnect', () => {
     await saveState(swell, (await loadState(swell)).id, { not_before: new Date(NOW + 600_000).toISOString() });
     forget(swell);
 
-    await disconnect(ctx, true);
+    const view = await disconnect(ctx, true);
 
-    expect(batchesOf(swell)).toHaveLength(2);
-    expect(roundTrips(swell)).toBe(2);
+    const [, critical, deletes] = batchesOf(swell).map((batch) => batch.map((op) => `${op.method} ${op.url.split('/')[1]}`));
+    expect(critical).toEqual(['put connections', 'put sync-states', 'put alarms', 'put markets']);
+    expect(deletes).toEqual(['delete queue-items']);
+    expect(roundTrips(swell)).toBe(3);
+    expect(view).toEqual({
+      connection: expect.objectContaining({ status: 'disconnected', has_key: false }),
+      market: expect.objectContaining({ country: 'US', data_source: null }),
+      defaults: { link_template: 'https://test-store.swell.store/products/{slug}' },
+    });
     expect(google.dataSources.size).toBe(0);
     expect(await loadConnection(swell)).toMatchObject({ status: 'disconnected', private_key: null, access_token: null });
     expect((await loadMarkets(swell))[0].data_source).toBeNull();
@@ -295,12 +302,50 @@ describe('disconnect', () => {
     expect((await connectionStatus(ctx)).connection.has_key).toBe(false);
   });
 
-  it('clears a queue longer than one batch', async () => {
-    const { ctx, swell } = setup();
-    await connect(ctx);
-    for (let i = 0; i < 850; i++) await enqueue(swell, { productId: `p${i}`, kind: 'full' });
+  async function bigQueue(size: number) {
+    const store = setup();
+    await connect(store.ctx);
+    for (let i = 0; i < size; i++) await enqueue(store.swell, { productId: `p${i}`, kind: 'full' });
+    forget(store.swell);
+    return store;
+  }
+
+  it('clears the whole queue when it has the time, one server wave per round trip', async () => {
+    const { ctx, swell } = await bigQueue(120);
     await disconnect(ctx, false);
     expect(await queueCount(swell)).toBe(0);
+    const deletes = batchesOf(swell).filter((batch) => batch[0].method === 'delete');
+    expect(deletes.map((batch) => batch.length)).toEqual(Array(12).fill(10));
+  });
+
+  it('writes what matters first and stops deleting queue items at 7 s', async () => {
+    const { swell, google } = await bigQueue(120);
+    const slow = slowServices(swell, google.fetch, { swellMs: 1200, googleMs: 1000 });
+    await disconnect(testContext(slow.swell, slow.fetch, slow.now), false);
+    const batches = batchesOf(swell);
+    expect(batches[1].map((op) => op.method)).toEqual(['put', 'put', 'put']);
+    expect(Math.max(...batches.filter((batch) => batch[0].method === 'delete').map((batch) => batch.length))).toBeLessThanOrEqual(50);
+    // Read 1.2 s, the critical writes 2.4 s, then deletes while one more fits before 7 s.
+    expect(slow.now() - NOW).toBe(6000);
+    expect(await queueCount(swell)).toBe(120 - 30);
+    expect(await loadConnection(swell)).toMatchObject({ status: 'disconnected', private_key: null });
+  });
+
+  it('stops at queue items Swell refuses to delete', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { ctx, swell, refuse } = await bigQueue(120);
+    refuse((method, url) => (method === 'delete' && url.startsWith('/queue-items/') ? 'Permission denied' : null));
+    await disconnect(ctx, false);
+    expect(await queueCount(swell)).toBe(120);
+    expect(batchesOf(swell).filter((batch) => batch[0].method === 'delete')).toHaveLength(12);
+  });
+
+  it('fails when Swell refuses to wipe the key', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { ctx, refuse } = setup();
+    await connect(ctx);
+    refuse((method, url) => (method === 'put' && url.startsWith('/connections/') ? 'Permission denied' : null));
+    await expect(disconnect(ctx, false)).rejects.toThrow('Permission denied');
   });
 
   it('leaves Google alone when asked to keep the products', async () => {

@@ -1,11 +1,11 @@
-import { AppError, type AppContext } from '../context';
+import { AppError, measured, type AppContext } from '../context';
 import { GoogleApiError, googleCall } from '../google/http';
 import { deleteDataSource } from '../google/merchant';
-import { countOf, listOf, recordOf, swellBatch, type BatchOp } from '../swell-batch';
+import { countOf, listOf, recordOf, SWELL_WAVE, swellBatch, type BatchOp } from '../swell-batch';
 import { alarmRead, alarmWrite, type Alarm } from '../sync/alarm';
-import { clearQueue, itemRemoval, takeRead, type QueueItem } from '../sync/queue';
+import { itemRemoval, takeRead, type QueueItem } from '../sync/queue';
 import { newFullSyncJob, stateRead, stateWrite, type SyncState } from '../sync/state';
-import { iso } from '../time';
+import { Budget, iso } from '../time';
 import { runChecks, type CheckReport } from './checks';
 import { languageOf, loadMarkets, marketsRead, replaceMarket, type Market, type MarketInput } from './markets';
 import {
@@ -37,8 +37,9 @@ export interface StatusView {
   defaults: { link_template: string };
 }
 
-/** Queue items a disconnect removes in its own batch; more take further rounds. */
-const DISCONNECT_TAKE = 800;
+/** A disconnect deletes queue items until this long after it started, well within the route's 10 s. */
+export const DISCONNECT_BUDGET_MS = 7000;
+const QUEUE_READ = 50;
 
 const firstOf = <T>(answer: unknown, what: string): T | null => listOf<T>(answer, what)[0] ?? null;
 const defaultsOf = (ctx: AppContext) => ({ link_template: `${ctx.storeUrl.replace(/\/$/, '')}/products/{slug}` });
@@ -156,15 +157,22 @@ export async function activate(ctx: AppContext, input: ActivateInput): Promise<S
   return { connection: publicConnection(connection), market, defaults: defaultsOf(ctx) };
 }
 
-/** Stops syncing and forgets the key; optionally removes the products from Google first. */
-export async function disconnect(ctx: AppContext, removeProducts: boolean): Promise<void> {
-  const answers = await swellBatch(ctx.swell, [connectionRead, marketsRead, stateRead, alarmRead, takeRead(DISCONNECT_TAKE)]);
+/**
+ * Stops syncing and forgets the key; optionally removes the products from
+ * Google first. The writes that matter go in one batch and must all be
+ * taken; then queue items go, one server wave per round trip, while the
+ * route has time. Items left over are harmless: nothing runs or queues while
+ * disconnected, and connecting again sends the catalog anew.
+ */
+export async function disconnect(appCtx: AppContext, removeProducts: boolean): Promise<StatusView> {
+  const budget = new Budget(appCtx.now, DISCONNECT_BUDGET_MS);
+  const ctx = measured(appCtx, budget);
+  const answers = await swellBatch(ctx.swell, [connectionRead, marketsRead, stateRead, alarmRead, takeRead(QUEUE_READ)]);
   const connection = firstOf<Connection>(answers[0], 'the connection');
-  if (!connection) return;
   const markets = listOf<Market>(answers[1], 'the markets');
+  if (!connection) return { connection: publicConnection(null), market: markets[0] ?? null, defaults: defaultsOf(ctx) };
   const state = firstOf<SyncState>(answers[2], 'the sync state');
   const alarm = firstOf<Alarm>(answers[3], 'the alarm');
-  const queue = listOf<QueueItem>(answers[4], 'the queue');
   let lastError: string | null = null;
 
   if (removeProducts && connection.merchant_id) {
@@ -183,10 +191,8 @@ export async function disconnect(ctx: AppContext, removeProducts: boolean): Prom
     }
   }
 
+  const clear = alarmWrite(alarm, null);
   const writes: BatchOp[] = [
-    ...markets.filter((market) => market.data_source).map((market): BatchOp => ({ method: 'put', url: `/markets/${market.id}`, data: { data_source: null } })),
-    ...queue.map((item) => itemRemoval(item.id)),
-    ...(state ? [stateWrite(state.id, { full_sync: null, running_since: null, backoff: 0, last_error: null, not_before: null })] : []),
     connectionWrite(connection.id, {
       status: 'disconnected',
       private_key: null,
@@ -195,9 +201,30 @@ export async function disconnect(ctx: AppContext, removeProducts: boolean): Prom
       access_token_expires: null,
       last_error: lastError,
     }),
+    ...(state ? [stateWrite(state.id, { full_sync: null, running_since: null, backoff: 0, last_error: null, not_before: null })] : []),
+    ...(clear ? [clear] : []),
+    ...markets.filter((market) => market.data_source).map((market): BatchOp => ({ method: 'put', url: `/markets/${market.id}`, data: { data_source: null } })),
   ];
-  const clear = alarmWrite(alarm, null);
-  if (clear) writes.push(clear);
-  await swellBatch(ctx.swell, writes);
-  if (countOf(answers[4]) > queue.length) await clearQueue(ctx.swell);
+  const results = await swellBatch(ctx.swell, writes);
+  results.forEach((result, i) => recordOf(result, `the write to ${writes[i].url}`));
+
+  let queue = listOf<QueueItem>(answers[4], 'the queue');
+  let more = countOf(answers[4]) > queue.length;
+  const tried: string[] = [];
+  while (budget.has(budget.swellMs)) {
+    if (!queue.length) {
+      if (!more || !budget.has(2 * budget.swellMs)) break;
+      const [next] = await swellBatch(ctx.swell, [takeRead(QUEUE_READ, tried)]);
+      queue = listOf<QueueItem>(next, 'the queue');
+      more = countOf(next) > queue.length;
+      if (!queue.length) break;
+      continue;
+    }
+    const chunk = queue.splice(0, SWELL_WAVE);
+    tried.push(...chunk.map((item) => item.id));
+    await swellBatch(ctx.swell, chunk.map((item) => itemRemoval(item.id)));
+  }
+
+  const market = markets[0] ? { ...markets[0], data_source: null } : null;
+  return { connection: publicConnection(recordOf<Connection>(results[0], 'the connection')), market, defaults: defaultsOf(ctx) };
 }

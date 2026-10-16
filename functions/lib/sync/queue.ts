@@ -1,5 +1,5 @@
 import type { AppContext, SwellClient } from '../context';
-import { swellBatch, type BatchOp } from '../swell-batch';
+import type { BatchOp } from '../swell-batch';
 import { iso } from '../time';
 
 export type QueueKind = 'full' | 'light' | 'delete';
@@ -37,7 +37,6 @@ export interface WorkUnit {
 export const MAX_ATTEMPTS = 8;
 
 const COLLECTION = '/queue-items';
-const CLEAR_CHUNK = 500;
 
 /** A deleted product stays deleted; a full update covers a light one. */
 export function mergeKind(a: QueueKind, b: QueueKind): QueueKind {
@@ -180,16 +179,4 @@ export function settleWrites(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]
   }
   writes.push(...removed.map(itemRemoval));
   return { writes, removed };
-}
-
-export async function clearQueue(swell: SwellClient): Promise<void> {
-  let previous = '';
-  for (;;) {
-    const items = await takeQueue(swell, CLEAR_CHUNK);
-    const ids = items.map((item) => item.id).join(',');
-    // Deletes that keep failing would otherwise loop forever.
-    if (!items.length || ids === previous) return;
-    previous = ids;
-    await swellBatch(swell, items.map((item) => itemRemoval(item.id)));
-  }
 }
