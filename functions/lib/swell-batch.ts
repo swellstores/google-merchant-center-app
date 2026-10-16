@@ -78,7 +78,9 @@ export class Outbox {
 
   /**
    * Sends the waiting writes and `ops` in one round trip; resolves with the
-   * answers to `ops`. A put of `ops` takes in a waiting put to the same record.
+   * answers to `ops`. A put of `ops` takes in a waiting put to the same record,
+   * shallowly like `add`: its top-level fields win whole, so a product's
+   * `$app` put must never be sent in `ops` while another waits.
    */
   async send(ops: BatchOp[] = []): Promise<unknown[]> {
     const waiting = this.ops;

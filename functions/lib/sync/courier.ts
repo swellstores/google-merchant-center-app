@@ -336,8 +336,9 @@ async function finish(run: Ending, result: WorkResult): Promise<CourierOutcome> 
 
   const alarm = alarmWrite(run.alarm, at);
   if (alarm) outbox.add(alarm);
-  // A refused state write fails the run; the dead-man alarm brings the next one.
-  // It takes in the start of a job that no round trip has carried yet.
+  // A refused state write fails the run; the dead-man alarm brings the next
+  // one, or for an hourly run, which sets none, the next hour. It takes in the
+  // start of a job that no round trip has carried yet.
   const [saved] = await outbox.send([stateWrite(state.id, patch)]);
   recordOf(saved, 'the run’s end');
   return outcome;

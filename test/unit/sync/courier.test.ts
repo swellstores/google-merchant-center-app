@@ -902,6 +902,47 @@ describe('runCourier status jobs', () => {
     expect((await loadState(swell)).status_refresh).toMatchObject({ status: 'running', cursor: null, checked: 0 });
   });
 
+  it('no refresh pass while the queue has work', async () => {
+    const products = many(PASS_PRODUCTS + 1);
+    const store = await listed(products);
+    await saveState(store.swell, (await loadState(store.swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) } });
+    for (const p of products) await enqueue(store.swell, { productId: p.id, kind: 'full' });
+    // The next take does not fit after the first pass, though a refresh pass would.
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1000, googleMs: 1000 });
+    expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now))).toEqual({ next: 'soon', sent: PASS_PRODUCTS });
+    expect(googleCalls(store.google)).not.toContain('status');
+    expect(await queueCount(store.swell)).toBe(1);
+    expect((await loadState(store.swell)).status_refresh).toMatchObject({ status: 'running', cursor: null, checked: 0 });
+  });
+
+  it('no refresh pass while the catalog sync has work', async () => {
+    const store = await listed(many(2 * PASS_PRODUCTS + 1));
+    await saveState(store.swell, (await loadState(store.swell)).id, {
+      full_sync: { $set: { status: 'running', cursor: null, total: 0, done: 0, date_started: at(NOW) } },
+      status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) },
+    });
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 });
+    expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now))).toEqual({ next: 'soon', sent: PASS_PRODUCTS });
+    expect(googleCalls(store.google)).not.toContain('status');
+    const state = await loadState(store.swell);
+    expect(state.full_sync).toMatchObject({ status: 'running', done: PASS_PRODUCTS });
+    expect(state.status_refresh).toMatchObject({ status: 'running', cursor: null, checked: 0 });
+  });
+
+  it('no orphan-scan pass while the refresh runs', async () => {
+    const store = await listed(many(STATUS_PAGE + 1));
+    await saveState(store.swell, (await loadState(store.swell)).id, {
+      status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) },
+      orphan_scan: { $set: newOrphanScanJob(NOW - MINUTE) },
+    });
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 });
+    expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now))).toEqual({ next: 'soon', sent: 0 });
+    expect(googleCalls(store.google)).not.toContain('list');
+    const state = await loadState(store.swell);
+    expect(state.status_refresh).toMatchObject({ status: 'running', checked: STATUS_PAGE });
+    expect(state.orphan_scan).toMatchObject({ status: 'running', page_token: null, skip: 0, found: 0 });
+  });
+
   it('the status refresh reads its own page after the queue, with the writes that wait', async () => {
     const { ctx, swell } = await listed([MUG]);
     await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) } });
@@ -926,6 +967,19 @@ describe('runCourier status jobs', () => {
     const state = await loadState(swell);
     expect(state.status_refresh).toEqual(restarted);
     expect(state.summary ?? null).toBeNull();
+  });
+
+  it('an orphan scan restarted during the run wins', async () => {
+    const stray = { dataSource: DS, offerId: 'gone', contentLanguage: 'en', feedLabel: 'US' };
+    const { swell, google } = await listed([MUG], { strays: [stray] });
+    await saveState(swell, (await loadState(swell)).id, { orphan_scan: { $set: newOrphanScanJob(NOW - MINUTE) } });
+    const restarted = newOrphanScanJob(NOW);
+    const restarting = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (/\/accounts\/\d+\/products\?/.test(String(input))) await saveState(swell, (await loadState(swell)).id, { orphan_scan: { $set: restarted } });
+      return google.fetch(input, init);
+    }) as typeof fetch;
+    expect(await runCourier(testContext(swell, restarting))).toEqual({ next: 'soon', sent: 0 });
+    expect((await loadState(swell)).orphan_scan).toEqual(restarted);
   });
 
   it('a refresh the run started survives a read that came back before the start was written', async () => {
@@ -971,6 +1025,18 @@ describe('runCourier status jobs', () => {
     expect(state.status_refresh).toMatchObject({ status: 'done' });
     expect(state.orphan_scan).toMatchObject({ status: 'done', found: 1, date_started: at(NOW) });
     expect(collections['/queue-items']).toEqual([expect.objectContaining({ product_id: 'gone', kind: 'delete', input_ids: ['en~US~gone'] })]);
+  });
+
+  it('an orphan-scan run ends within 8 s at 1.3 s per Swell round trip and 1.5 s per Google call', async () => {
+    const stray = { dataSource: DS, offerId: 'gone', contentLanguage: 'en', feedLabel: 'US' };
+    const store = await listed([MUG], { strays: [stray] });
+    await saveState(store.swell, (await loadState(store.swell)).id, { orphan_scan: { $set: newOrphanScanJob(NOW - MINUTE) } });
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 });
+    expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now))).toEqual({ next: 'idle', sent: 0 });
+    // Start, the mark, Google's list, the products read, the queue writes, the end: the gate's 3 round trips and a call exactly.
+    expect(slow.now() - NOW).toBe(5 * 1300 + 1500);
+    expect(slow.now() - NOW).toBeLessThanOrEqual(COURIER_BUDGET_MS);
+    expect((await loadState(store.swell)).orphan_scan).toMatchObject({ status: 'done', found: 1 });
   });
 
   it('status checks do not pace the next run', async () => {
