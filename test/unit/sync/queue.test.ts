@@ -149,6 +149,16 @@ describe('settleQueue', () => {
     expect(collections['/products'][0].$app[APP_ID]).toMatchObject({ sync_state: 'error', sync_error: 'Google kept failing' });
   });
 
+  it('gives up on a delete without writing to the deleted product', async () => {
+    const { swell, collections } = createFakeSwell();
+    await enqueue(swell, { productId: 'gone', kind: 'delete', inputIds: ['en~US~gone'] });
+    const [unit] = unitsFromQueue(await takeQueue(swell, 10));
+    await settleQueue(testContext(swell), [], [{ ...unit, attempts: MAX_ATTEMPTS - 1, error: 'backend error', charge: true }]);
+    expect(collections['/queue-items']).toHaveLength(0);
+    // A PUT to a missing id would create a product with only the app's fields.
+    expect(collections['/products']).toHaveLength(0);
+  });
+
   it('keeps an item edited while the courier sent it', async () => {
     const { swell, collections } = createFakeSwell();
     await enqueue(swell, { productId: 'p1', kind: 'light' });

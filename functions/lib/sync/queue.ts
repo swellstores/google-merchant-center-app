@@ -173,6 +173,8 @@ export function settleWrites(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]
     const attempts = progressed ? 0 : unit.charge ? unit.attempts + 1 : unit.attempts;
     if (attempts >= MAX_ATTEMPTS) {
       removed.push(...ids.filter((id) => unchanged(unit, id)));
+      // A deleted product is gone: a PUT would create it again.
+      if (unit.kind === 'delete') continue;
       writes.push({
         method: 'put',
         url: `/products/${unit.productId}`,
