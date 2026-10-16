@@ -21,6 +21,7 @@
     "status_label": { "type": "string" },
     "status_issues": { "type": "array", "value_type": "object" },
     "status_hash": { "type": "string" },
-    "date_status": { "type": "date" }
+    "date_status": { "type": "date" },
+    "preview": { "type": "string", "description": "Not stored: hosts the ShoppingPreview component" }
   }
 }
