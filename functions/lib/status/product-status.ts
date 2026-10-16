@@ -84,7 +84,7 @@ function severityOf(google: string | undefined): StatusIssue['severity'] {
   return 'info';
 }
 
-function groupIssues(answers: OfferAnswer[]): StatusIssue[] {
+export function groupIssues(answers: OfferAnswer[]): StatusIssue[] {
   const groups = new Map<string, StatusIssue>();
   const add = (code: string, severity: StatusIssue['severity'], inputId: string, countries: string[], from: Partial<StatusIssue>) => {
     let issue = groups.get(code);
