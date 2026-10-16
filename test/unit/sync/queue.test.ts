@@ -1,16 +1,32 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AppContext } from '../../../functions/lib/context';
+import { listOf, swellBatch } from '../../../functions/lib/swell-batch';
 import {
   clearQueue,
   enqueue,
+  itemsRead,
   MAX_ATTEMPTS,
   mergeKind,
   queueCount,
-  settleQueue,
+  settleWrites,
   takeQueue,
+  takeRead,
   unitsFromQueue,
+  type QueueItem,
+  type WorkUnit,
 } from '../../../functions/lib/sync/queue';
 import { APP_ID, testContext } from '../../helpers/context';
-import { createFakeSwell } from '../../helpers/fake-swell';
+import { batchesOf, createFakeSwell } from '../../helpers/fake-swell';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+/** Reads the taken items again and sends the settling writes, the way the courier does. */
+async function settleQueue(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]) {
+  const [current] = await swellBatch(ctx.swell, [itemsRead([...done, ...kept].flatMap((unit) => unit.queueItemIds))]);
+  await swellBatch(ctx.swell, settleWrites(ctx, done, kept, listOf<QueueItem>(current, 'the queue')).writes);
+}
 
 describe('mergeKind', () => {
   it.each([
@@ -161,6 +177,29 @@ describe('settleQueue', () => {
     expect(collections['/queue-items'][0]).toMatchObject({ kind: 'delete', input_ids: ['en~US~p1'], attempts: 1 });
   });
 
+  it('settles in one batch: removals, kept items and give-ups', async () => {
+    const { swell, collections } = createFakeSwell({ products: [{ id: 'p3', name: 'Stuck' }] });
+    for (const id of ['p1', 'p2', 'p3']) await enqueue(swell, { productId: id, kind: 'full' });
+    const [done, kept, stuck] = unitsFromQueue(await takeQueue(swell, 10));
+    const ctx = testContext(swell);
+    const [current] = await swellBatch(swell, [itemsRead([done, kept, stuck].flatMap((unit) => unit.queueItemIds))]);
+    const settled = settleWrites(ctx, [done], [kept, { ...stuck, attempts: MAX_ATTEMPTS - 1, charge: true }], listOf<QueueItem>(current, 'the queue'));
+    expect(settled.writes.map((op) => `${op.method} ${op.url.split('/')[1]}`)).toEqual(['put queue-items', 'put products', 'delete queue-items', 'delete queue-items']);
+    expect(settled.removed).toHaveLength(2);
+    swell.post.mockClear();
+    await swellBatch(swell, settled.writes);
+    expect(batchesOf(swell)).toHaveLength(1);
+    expect(collections['/queue-items'].map((item) => item.product_id)).toEqual(['p2']);
+  });
+
+  it('takes the oldest items it has not taken yet', async () => {
+    const { swell } = createFakeSwell();
+    for (const id of ['p1', 'p2', 'p3']) await enqueue(swell, { productId: id, kind: 'full' });
+    const [first] = await takeQueue(swell, 1);
+    const [answer] = await swellBatch(swell, [takeRead(10, [first.id])]);
+    expect(listOf<QueueItem>(answer, 'the queue').map((item) => item.product_id)).toEqual(['p2', 'p3']);
+  });
+
   it('keeps the input ids of a kept unit\'s duplicates', async () => {
     const { swell, collections } = createFakeSwell();
     collections['/queue-items'].push(
@@ -181,12 +220,20 @@ describe('settleQueue', () => {
     expect(await queueCount(swell)).toBe(0);
   });
 
+  it('clears in one batch per chunk', async () => {
+    const { swell } = createFakeSwell();
+    for (const id of ['p1', 'p2', 'p3']) await enqueue(swell, { productId: id, kind: 'full' });
+    swell.post.mockClear();
+    await clearQueue(swell);
+    expect(batchesOf(swell).map((batch) => batch.length)).toEqual([3]);
+    expect(swell.delete).not.toHaveBeenCalled();
+  });
+
   it('stops clearing when deletes keep failing', async () => {
-    const { swell, collections } = createFakeSwell();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { swell, collections, refuse } = createFakeSwell();
     await enqueue(swell, { productId: 'p1', kind: 'full' });
-    swell.delete.mockImplementation(async () => {
-      throw new Error('denied');
-    });
+    refuse((method) => (method === 'delete' ? 'denied' : null));
     // Guard: a looping clearQueue fails here instead of spinning forever.
     const realGet = swell.get.getMockImplementation()!;
     let reads = 0;

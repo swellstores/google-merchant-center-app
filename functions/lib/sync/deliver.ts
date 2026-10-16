@@ -5,6 +5,7 @@ import { classifyGoogleError, errorMessage, GoogleApiError } from '../google/htt
 import { deleteProductInput, insertProductInput, patchProductInput, type ProductAttributes } from '../google/merchant';
 import { buildOffers, marketOfInput, parseInputId, type OfferDefaults, type SkipReason } from '../mapping/offers';
 import type { GoogleFields, SwellProduct } from '../mapping/types';
+import type { Outbox } from '../swell-batch';
 import { iso, type Budget } from '../time';
 import type { WorkUnit } from './queue';
 
@@ -16,6 +17,8 @@ export interface DeliveryEnv {
   markets: Market[];
   defaults: OfferDefaults;
   budget: Budget;
+  /** Takes the products' sync fields for the caller's next round trip */
+  outbox: Outbox;
 }
 
 export interface DeliveryReport {
@@ -34,8 +37,6 @@ export interface DeliveryReport {
 /** Time a batch needs, so the run never starts one it cannot finish. */
 export const SEND_RESERVE_MS = 2500;
 export const LIGHT_MASK: (keyof ProductAttributes)[] = ['price', 'salePrice', 'availability'];
-
-const WRITE_CONCURRENCY = 10;
 
 interface Op {
   kind: 'insert' | 'patch' | 'delete';
@@ -189,10 +190,12 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
  * Sends the units' offers in batches of at most 100 while the budget lasts and
  * sorts each unit into done, kept or untouched. A unit is done only when Google
  * answered every one of its calls with something final; kept units report the
- * calls that completed; untouched units never went out.
+ * calls that completed; untouched units never went out. The done products'
+ * sync fields wait in `env.outbox`. `read` are the products when the caller
+ * has them already.
  */
-export async function deliver(env: DeliveryEnv, units: WorkUnit[]): Promise<DeliveryReport> {
-  const products = await readProducts(env, units.filter((u) => u.kind !== 'delete').map((u) => u.productId));
+export async function deliver(env: DeliveryEnv, units: WorkUnit[], read?: Map<string, SwellProduct>): Promise<DeliveryReport> {
+  const products = read ?? (await readProducts(env, units.filter((u) => u.kind !== 'delete').map((u) => u.productId)));
   const plans = units.map((unit) => planUnit(env, unit, products.get(unit.productId) ?? null));
   const ops = plans.flatMap((plan) => plan.ops);
 
@@ -213,7 +216,6 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[]): Promise<Deli
   }
 
   const report: DeliveryReport = { done: [], kept: [], untouched: [], sentOps: results.size, failure };
-  const writes: [string, GoogleFields][] = [];
   let short: GoogleApiError | undefined;
   for (const plan of plans) {
     const settled = settlePlan(env, plan, results, attempted);
@@ -234,17 +236,11 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[]): Promise<Deli
       continue;
     }
     report.done.push(plan.unit);
-    if (plan.product && settled.fields) writes.push([plan.product.id, settled.fields]);
+    if (plan.product && settled.fields) {
+      env.outbox.add({ method: 'put', url: `/products/${plan.product.id}`, data: { $app: { [env.ctx.appId]: settled.fields } } });
+    }
   }
   // A part was rate limited or failed on Google's side: the courier settles what it has and backs off.
   report.failure ??= short;
-
-  for (let i = 0; i < writes.length; i += WRITE_CONCURRENCY) {
-    await Promise.all(
-      writes.slice(i, i + WRITE_CONCURRENCY).map(([id, fields]) =>
-        env.ctx.swell.put(`/products/${id}`, { $app: { [env.ctx.appId]: fields } }).catch(() => undefined),
-      ),
-    );
-  }
   return report;
 }

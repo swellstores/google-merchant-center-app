@@ -1,5 +1,6 @@
 import { AppError, type SwellClient } from '../context';
 import type { ServiceAccountKey } from '../google/jwt';
+import type { BatchOp } from '../swell-batch';
 
 export type ConnectionStatus = 'disconnected' | 'connected' | 'broken';
 
@@ -30,9 +31,13 @@ export interface PublicConnection {
 
 // The bare path is the app's own collection and needs no permission.
 const COLLECTION = '/connections';
+const FIRST = { limit: 1, sort: 'date_created asc' };
+
+export const connectionRead: BatchOp = { method: 'get', url: COLLECTION, data: FIRST };
+export const connectionWrite = (id: string, patch: Partial<Connection>): BatchOp => ({ method: 'put', url: `${COLLECTION}/${id}`, data: patch });
 
 export async function loadConnection(swell: SwellClient): Promise<Connection | null> {
-  const list = await swell.get(COLLECTION, { limit: 1, sort: 'date_created asc' });
+  const list = await swell.get(COLLECTION, FIRST);
   return list?.results?.[0] ?? null;
 }
 

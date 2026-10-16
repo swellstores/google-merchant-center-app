@@ -1,4 +1,5 @@
 import type { AppContext, SwellClient } from '../context';
+import { swellBatch, type BatchOp } from '../swell-batch';
 import { iso } from '../time';
 
 export type QueueKind = 'full' | 'light' | 'delete';
@@ -36,7 +37,7 @@ export interface WorkUnit {
 export const MAX_ATTEMPTS = 8;
 
 const COLLECTION = '/queue-items';
-const DELETE_CONCURRENCY = 10;
+const CLEAR_CHUNK = 500;
 
 /** A deleted product stays deleted; a full update covers a light one. */
 export function mergeKind(a: QueueKind, b: QueueKind): QueueKind {
@@ -45,25 +46,57 @@ export function mergeKind(a: QueueKind, b: QueueKind): QueueKind {
   return 'light';
 }
 
-export async function enqueue(swell: SwellClient, plan: { productId: string; kind: QueueKind; inputIds?: string[] }): Promise<void> {
-  const existing = await swell.get(COLLECTION, { where: { product_id: plan.productId }, limit: 1 });
-  const current: QueueItem | undefined = existing?.results?.[0];
-  if (!current) {
-    await swell.post(COLLECTION, { product_id: plan.productId, kind: plan.kind, input_ids: plan.inputIds ?? [], attempts: 0, revision: 0 });
-    return;
-  }
-  await swell.put(`${COLLECTION}/${current.id}`, {
-    kind: mergeKind(current.kind, plan.kind),
-    revision: (current.revision ?? 0) + 1,
-    // The product changed: every offer is sent again. Offers sent for the old
-    // revision stay known, so the courier deletes them if they vanished.
-    input_ids: [...new Set([...(current.input_ids ?? []), ...(current.done_input_ids ?? []), ...(plan.inputIds ?? [])])],
-    done_input_ids: [],
-  });
+export interface QueuePlan {
+  productId: string;
+  kind: QueueKind;
+  inputIds?: string[];
 }
 
+/** The write that queues a change, merged into the product's item when it has one. */
+export function enqueueWrite(current: QueueItem | undefined, plan: QueuePlan): BatchOp {
+  if (!current) {
+    return { method: 'post', url: COLLECTION, data: { product_id: plan.productId, kind: plan.kind, input_ids: plan.inputIds ?? [], attempts: 0, revision: 0 } };
+  }
+  return {
+    method: 'put',
+    url: `${COLLECTION}/${current.id}`,
+    data: {
+      kind: mergeKind(current.kind, plan.kind),
+      revision: (current.revision ?? 0) + 1,
+      // The product changed: every offer is sent again. Offers sent for the old
+      // revision stay known, so the courier deletes them if they vanished.
+      input_ids: [...new Set([...(current.input_ids ?? []), ...(current.done_input_ids ?? []), ...(plan.inputIds ?? [])])],
+      done_input_ids: [],
+    },
+  };
+}
+
+export async function enqueue(swell: SwellClient, plan: QueuePlan): Promise<void> {
+  const existing = await swell.get(COLLECTION, { where: { product_id: plan.productId }, limit: 1 });
+  const op = enqueueWrite(existing?.results?.[0], plan);
+  if (op.method === 'post') await swell.post(op.url, op.data!);
+  else await swell.put(op.url, op.data!);
+}
+
+/** The oldest items, leaving out `exclude` (items this run took already). */
+export function takeRead(limit: number, exclude: string[] = []): BatchOp {
+  return { method: 'get', url: COLLECTION, data: { ...(exclude.length ? { where: { id: { $nin: exclude } } } : {}), sort: 'date_created asc', limit } };
+}
+
+/** The items again, to see which changed while the courier sent them. */
+export const itemsRead = (ids: string[]): BatchOp => ({ method: 'get', url: COLLECTION, data: { where: { id: { $in: ids } }, limit: ids.length } });
+
+/** The items of these products, oldest first. */
+export const productItemsRead = (productIds: string[]): BatchOp => ({
+  method: 'get',
+  url: COLLECTION,
+  data: { where: { product_id: { $in: productIds } }, sort: 'date_created asc', limit: 1000 },
+});
+
+const removal = (id: string): BatchOp => ({ method: 'delete', url: `${COLLECTION}/${id}` });
+
 export async function takeQueue(swell: SwellClient, limit: number): Promise<QueueItem[]> {
-  const list = await swell.get(COLLECTION, { sort: 'date_created asc', limit });
+  const list = await swell.get(COLLECTION, takeRead(limit).data);
   return list?.results ?? [];
 }
 
@@ -99,50 +132,42 @@ export function unitsFromQueue(items: QueueItem[]): WorkUnit[] {
   return [...byProduct.values()];
 }
 
-async function inChunks<T>(values: T[], run: (value: T) => Promise<unknown>): Promise<void> {
-  for (let i = 0; i < values.length; i += DELETE_CONCURRENCY) {
-    await Promise.all(values.slice(i, i + DELETE_CONCURRENCY).map(run));
-  }
-}
-
-async function currentItems(swell: SwellClient, ids: string[]): Promise<Map<string, QueueItem>> {
-  if (!ids.length) return new Map();
-  const list = await swell.get(COLLECTION, { where: { id: { $in: ids } }, limit: ids.length });
-  return new Map((list?.results ?? []).map((item: QueueItem): [string, QueueItem] => [item.id, item]));
-}
-
 /**
- * Removes the items of finished units, except items edited since they were
- * taken: those carry a newer change and stay for the next run. A kept unit
- * stays as one item, merged with any edit made meanwhile; a charged one counts
- * an attempt, and after the last attempt it is dropped and the product says why.
+ * The writes that settle a delivery, given the taken items as they are now:
+ * finished units' items go, except items edited since they were taken (those
+ * carry a newer change and stay for the next run). A kept unit stays as one
+ * item, merged with any edit made meanwhile; a charged one counts an attempt,
+ * and after the last attempt it is dropped and the product says why.
  */
-export async function settleQueue(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]): Promise<void> {
-  const current = await currentItems(ctx.swell, [...done, ...kept].flatMap((unit) => unit.queueItemIds));
+export function settleWrites(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[], items: QueueItem[]): { writes: BatchOp[]; removed: string[] } {
+  const current = new Map(items.map((item): [string, QueueItem] => [item.id, item]));
   const unchanged = (unit: WorkUnit, id: string) => {
     const item = current.get(id);
     return Boolean(item) && (item!.revision ?? 0) === (unit.revisions?.[id] ?? 0);
   };
-  const remove: string[] = done.flatMap((unit) => unit.queueItemIds.filter((id) => unchanged(unit, id)));
+  const removed: string[] = done.flatMap((unit) => unit.queueItemIds.filter((id) => unchanged(unit, id)));
+  const writes: BatchOp[] = [];
   for (const unit of kept) {
     const ids = unit.queueItemIds.filter((id) => current.has(id));
     if (!ids.length) continue;
     const progressed = Boolean(unit.progress?.length);
     const attempts = progressed ? 0 : unit.charge ? unit.attempts + 1 : unit.attempts;
     if (attempts >= MAX_ATTEMPTS) {
-      remove.push(...ids.filter((id) => unchanged(unit, id)));
-      await ctx.swell
-        .put(`/products/${unit.productId}`, {
-          $app: { [ctx.appId]: { sync_state: 'error', sync_error: unit.error ?? 'Google did not accept the product', date_synced: iso(ctx.now()) } },
-        })
-        .catch(() => undefined);
+      removed.push(...ids.filter((id) => unchanged(unit, id)));
+      writes.push({
+        method: 'put',
+        url: `/products/${unit.productId}`,
+        data: { $app: { [ctx.appId]: { sync_state: 'error', sync_error: unit.error ?? 'Google did not accept the product', date_synced: iso(ctx.now()) } } },
+      });
       continue;
     }
     const [keep, ...duplicates] = ids;
-    remove.push(...duplicates.filter((id) => unchanged(unit, id)));
+    removed.push(...duplicates.filter((id) => unchanged(unit, id)));
     const item = current.get(keep)!;
-    await ctx.swell
-      .put(`${COLLECTION}/${keep}`, {
+    writes.push({
+      method: 'put',
+      url: `${COLLECTION}/${keep}`,
+      data: {
         kind: mergeKind(item.kind, unit.kind),
         input_ids: [...new Set([...(item.input_ids ?? []), ...unit.inputIds])],
         done_input_ids: unchanged(unit, keep)
@@ -150,20 +175,21 @@ export async function settleQueue(ctx: AppContext, done: WorkUnit[], kept: WorkU
           : (item.done_input_ids ?? []),
         attempts,
         last_error: unit.error ?? item.last_error ?? null,
-      })
-      .catch(() => undefined);
+      },
+    });
   }
-  await inChunks(remove, (id) => ctx.swell.delete(`${COLLECTION}/${id}`).catch(() => undefined));
+  writes.push(...removed.map(removal));
+  return { writes, removed };
 }
 
 export async function clearQueue(swell: SwellClient): Promise<void> {
   let previous = '';
   for (;;) {
-    const items = await takeQueue(swell, 100);
+    const items = await takeQueue(swell, CLEAR_CHUNK);
     const ids = items.map((item) => item.id).join(',');
     // Deletes that keep failing would otherwise loop forever.
     if (!items.length || ids === previous) return;
     previous = ids;
-    await inChunks(items, (item) => swell.delete(`${COLLECTION}/${item.id}`).catch(() => undefined));
+    await swellBatch(swell, items.map((item) => removal(item.id)));
   }
 }

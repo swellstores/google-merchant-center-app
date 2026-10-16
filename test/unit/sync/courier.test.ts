@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadConnection } from '../../../functions/lib/connection/store';
 import { loadMarkets } from '../../../functions/lib/connection/markets';
 import { loadAlarm, setAlarm } from '../../../functions/lib/sync/alarm';
@@ -8,7 +8,7 @@ import { loadState, saveState } from '../../../functions/lib/sync/state';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
 import { APP_ID, NOW, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
-import { createFakeSwell } from '../../helpers/fake-swell';
+import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
 import { makeServiceAccountKey } from '../../helpers/keys';
 
 let key: ServiceAccountKey;
@@ -17,13 +17,19 @@ beforeAll(async () => {
 });
 
 const at = (ms: number) => new Date(ms).toISOString();
+const DS = 'accounts/123/dataSources/1';
 const MUG = { id: 'p1', name: 'Mug', slug: 'mug', active: true, price: 12, images: [{ file: { url: 'https://cdn.example.com/mug.jpg' } }] };
 
 function setup(googleOptions: FakeGoogleOptions = {}, connection: Record<string, any> = {}) {
   return setupMany([MUG], googleOptions, connection);
 }
 
-function setupMany(products: Record<string, any>[], googleOptions: FakeGoogleOptions = {}, connection: Record<string, any> = {}) {
+function setupMany(
+  products: Record<string, any>[],
+  googleOptions: FakeGoogleOptions = {},
+  connection: Record<string, any> = {},
+  market: Record<string, any> = {},
+) {
   const google = createFakeGoogle(googleOptions);
   const fake = createFakeSwell({
     products,
@@ -36,9 +42,26 @@ function setupMany(products: Record<string, any>[], googleOptions: FakeGoogleOpt
       access_token_expires: at(NOW + 3600_000),
       ...connection,
     },
-    markets: [{ country: 'US', language: 'en', currency: 'USD', link_template: 'https://shop.example.com/products/{slug}' }],
+    markets: [{ country: 'US', language: 'en', currency: 'USD', link_template: 'https://shop.example.com/products/{slug}', ...market }],
   });
   return { google, ...fake, ctx: testContext(fake.swell, google.fetch) };
+}
+
+/** A store that ran before: its market has a data source and the quota is known. */
+async function steady(products: Record<string, any>[] = [MUG], googleOptions: FakeGoogleOptions = {}, connection: Record<string, any> = {}) {
+  const store = setupMany(products, googleOptions, connection, { data_source: DS });
+  const state = await loadState(store.swell);
+  await saveState(store.swell, state.id, { quota: { $set: { minute_limit: 300, daily_limit: 5000, date_checked: at(NOW) } } });
+  return store;
+}
+
+const opsOf = (batch: { method: string; url: string }[]) => batch.map((op) => `${op.method} ${op.url.replace(/\/[0-9a-f]{24}$/, '/:id')}`);
+
+function forget(swell: ReturnType<typeof createFakeSwell>['swell']) {
+  swell.get.mockClear();
+  swell.post.mockClear();
+  swell.put.mockClear();
+  swell.delete.mockClear();
 }
 
 describe('runCourier', () => {
@@ -86,14 +109,18 @@ describe('runCourier', () => {
     const { ctx, swell } = setup();
     await enqueue(swell, { productId: 'p1', kind: 'full' });
     await runCourier(ctx);
-    const alarmWrites = swell.put.mock.calls.filter(([url]) => url.startsWith('/alarms/')).map(([, patch]) => patch.wake_at);
+    const alarmWrites = batchesOf(swell)
+      .flat()
+      .filter((op) => op.url.startsWith('/alarms') && op.method !== 'get')
+      .map((op) => op.data!.wake_at);
     expect(alarmWrites).toEqual([at(NOW + 35_000), null]);
   });
 
   it('leaves no dead-man alarm when there is nothing to do', async () => {
     const { ctx, swell } = setup();
     expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 0 });
-    expect(swell.put.mock.calls.filter(([url]) => url.startsWith('/alarms/'))).toEqual([]);
+    expect(batchesOf(swell).flat().filter((op) => op.url.startsWith('/alarms') && op.method !== 'get')).toEqual([]);
+    expect(swell.put).not.toHaveBeenCalled();
   });
 
   it('releases the run mark and re-arms after an unexpected error', async () => {
@@ -149,7 +176,7 @@ describe('runCourier', () => {
     const get = swell.get;
     let pages = 0;
     swell.get = (async (url: string, query?: any) => {
-      if (url === '/products' && query?.fields === 'id' && ++pages === 1) await saveState(swell, state.id, { full_sync: { $set: restarted } });
+      if (url === '/products' && query?.sort === 'id asc' && ++pages === 1) await saveState(swell, state.id, { full_sync: { $set: restarted } });
       return get(url, query);
     }) as typeof get;
     expect((await runCourier(ctx)).next).toBe('soon');
@@ -202,6 +229,111 @@ describe('runCourier', () => {
     expect((await runCourier(ctx)).next).toBe('idle');
     expect(await loadConnection(swell)).toMatchObject({ status: 'broken', last_error: 'Invalid JWT Signature.' });
     expect((await loadAlarm(swell)).wake_at).toBeNull();
+  });
+});
+
+describe('runCourier round trips', () => {
+  it('sends a queue in five round trips and never reads the alarm on its own', async () => {
+    const { ctx, swell, google } = await steady();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    forget(swell);
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 1 });
+    expect(google.inputs.size).toBe(1);
+    const [start, mark, sent, end] = batchesOf(swell);
+    expect(opsOf(start)).toEqual(['get /connections', 'get /sync-states', 'get /alarms', 'get /markets', 'get /queue-items']);
+    expect(opsOf(mark)).toEqual(['put /sync-states/:id', 'post /alarms']);
+    expect(opsOf(sent)).toEqual(['put /products/p1', 'get /queue-items', 'get /sync-states/:id']);
+    expect(opsOf(end)).toEqual(['delete /queue-items/:id', 'put /sync-states/:id', 'put /alarms/:id']);
+    expect(swell.get.mock.calls.map(([url]) => url)).toEqual(['/products']);
+    expect(swell.put).not.toHaveBeenCalled();
+    expect(swell.delete).not.toHaveBeenCalled();
+    expect(roundTrips(swell)).toBe(5);
+  });
+
+  it('sends a catalog page in five round trips', async () => {
+    const { ctx, swell } = await steady();
+    const state = await loadState(swell);
+    await saveState(swell, state.id, { full_sync: { $set: { status: 'running', cursor: null, total: 0, done: 0, date_started: at(NOW) } } });
+    forget(swell);
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 1 });
+    expect(swell.get.mock.calls.map(([url]) => url)).toEqual(['/products']);
+    expect(opsOf(batchesOf(swell)[2])).toEqual(['put /products/p1', 'get /sync-states/:id']);
+    expect(roundTrips(swell)).toBe(5);
+    expect((await loadState(swell)).full_sync).toMatchObject({ status: 'done', total: 1, done: 1 });
+  });
+
+  it('creates a missing state and alarm in its first write', async () => {
+    const { ctx, swell, collections } = await steady();
+    collections['/sync-states'].length = 0;
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    forget(swell);
+    await runCourier(ctx);
+    expect(opsOf(batchesOf(swell)[1])).toEqual(['post /sync-states', 'post /alarms']);
+    expect(collections['/sync-states']).toHaveLength(1);
+    expect(collections['/alarms']).toHaveLength(1);
+  });
+
+  it('exits early after one read', async () => {
+    const { ctx, swell } = await steady();
+    const state = await loadState(swell);
+    await saveState(swell, state.id, { not_before: at(NOW + 60_000) });
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    forget(swell);
+    expect((await runCourier(ctx)).next).toBe('early');
+    expect(roundTrips(swell)).toBe(1);
+  });
+
+  it('clears the alarm in one write when not connected, and writes nothing when it is clear', async () => {
+    const { ctx, swell } = setup({}, { status: 'disconnected' });
+    await setAlarm(ctx, NOW + 5_000);
+    forget(swell);
+    await runCourier(ctx);
+    expect(roundTrips(swell)).toBe(2);
+    expect((await loadAlarm(swell)).wake_at).toBeNull();
+    forget(swell);
+    await runCourier(ctx);
+    expect(roundTrips(swell)).toBe(1);
+  });
+
+  it('settles an idle store in at most one write', async () => {
+    const { ctx, swell } = await steady();
+    const state = await loadState(swell);
+    await saveState(swell, state.id, { running_since: at(NOW - 120_000), last_error: 'old' });
+    forget(swell);
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 0 });
+    expect(roundTrips(swell)).toBe(2);
+    expect(await loadState(swell)).toMatchObject({ running_since: null, last_error: null });
+  });
+
+  it('stops loudly when Swell refuses its start read', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { ctx, refuse } = await steady();
+    refuse((method, url) => (url === '/connections' ? 'Permission denied' : null));
+    await expect(runCourier(ctx)).rejects.toThrow('Swell refused to read the connection: Permission denied');
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('GET /connections: Permission denied'));
+    log.mockRestore();
+  });
+
+  it('saves a refreshed token with its last write', async () => {
+    const { ctx, swell } = await steady([MUG], {}, { access_token: null, access_token_expires: null });
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    forget(swell);
+    await runCourier(ctx);
+    expect(swell.put).not.toHaveBeenCalled();
+    expect(opsOf(batchesOf(swell).at(-1)!)).toContain('put /connections/:id');
+    expect(await loadConnection(swell)).toMatchObject({ access_token: 'token-1' });
+  });
+
+  it('takes the next queue items in the round trip that settles the last ones', async () => {
+    const products = Array.from({ length: 60 }, (_, i) => ({ ...MUG, id: `p${String(i).padStart(2, '0')}`, slug: `p${i}` }));
+    const { ctx, swell, collections } = await steady(products);
+    for (const p of products) await enqueue(swell, { productId: p.id, kind: 'full' });
+    forget(swell);
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 60 });
+    expect(collections['/queue-items']).toHaveLength(0);
+    const take = batchesOf(swell)[3];
+    expect(opsOf(take).filter((op) => op.startsWith('delete'))).toHaveLength(50);
+    expect(opsOf(take).at(-1)).toBe('get /queue-items');
   });
 });
 

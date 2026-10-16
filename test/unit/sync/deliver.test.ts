@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Market } from '../../../functions/lib/connection/markets';
-import { deliver, type DeliveryEnv } from '../../../functions/lib/sync/deliver';
+import type { SwellProduct } from '../../../functions/lib/mapping/types';
+import { Outbox } from '../../../functions/lib/swell-batch';
+import { deliver as deliverOnly, type DeliveryEnv } from '../../../functions/lib/sync/deliver';
 import type { WorkUnit } from '../../../functions/lib/sync/queue';
 import { Budget } from '../../../functions/lib/time';
 import { APP_ID, fixedClock, steppingClock, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
-import { createFakeSwell } from '../../helpers/fake-swell';
+import { batchesOf, createFakeSwell } from '../../helpers/fake-swell';
 
 const DS = 'accounts/123/dataSources/1';
 const MARKET: Market = { id: 'm1', country: 'US', language: 'en', currency: 'USD', link_template: 'https://shop.example.com/products/{slug}', data_source: DS };
@@ -19,12 +21,25 @@ const unit = (productId: string, kind: WorkUnit['kind'] = 'full', extra: Partial
 
 function setup(products: Record<string, any>[], googleOptions: FakeGoogleOptions = {}, clock = fixedClock()) {
   const google = createFakeGoogle(googleOptions);
-  const { swell, collections } = createFakeSwell({ products });
-  const ctx = testContext(swell, google.fetch, clock);
-  const env: DeliveryEnv = { ctx, accountId: '123', token: 'tok', markets: [MARKET], defaults: { condition: 'new' }, budget: new Budget(clock, 7000) };
-  const appFields = (id: string) => collections['/products'].find((p) => p.id === id)?.$app?.[APP_ID];
-  return { google, env, appFields };
+  const fake = createFakeSwell({ products });
+  const ctx = testContext(fake.swell, google.fetch, clock);
+  const env: DeliveryEnv = {
+    ctx, accountId: '123', token: 'tok', markets: [MARKET], defaults: { condition: 'new' }, budget: new Budget(clock, 7000), outbox: new Outbox(fake.swell),
+  };
+  const appFields = (id: string) => fake.collections['/products'].find((p) => p.id === id)?.$app?.[APP_ID];
+  return { google, env, appFields, ...fake };
 }
+
+/** Delivers and sends the writes deliver left for the caller. */
+async function deliver(env: DeliveryEnv, units: WorkUnit[]) {
+  const report = await deliverOnly(env, units);
+  await env.outbox.send();
+  return report;
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('deliver', () => {
   it('inserts a new product and records what it sent', async () => {
@@ -166,14 +181,30 @@ describe('deliver', () => {
   });
 
   it('survives a failed product write', async () => {
-    const { env } = setup([mug()]);
-    const put = env.ctx.swell.put;
-    env.ctx.swell.put = (async (url: string, data: any) => {
-      if (url === '/products/p1') throw new Error('write failed');
-      return put(url, data);
-    }) as typeof put;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { env, refuse } = setup([mug()]);
+    refuse((method, url) => (method === 'put' && url === '/products/p1' ? 'write failed' : null));
     const report = await deliver(env, [unit('p1')]);
     expect(report.done.map((u) => u.productId)).toEqual(['p1']);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('write failed'));
+  });
+
+  it('leaves every product write for one batch', async () => {
+    const products = [mug(), mug({ id: 'p2', slug: 'p2' }), mug({ id: 'p3', slug: 'p3' })];
+    const { env, swell, appFields } = setup(products);
+    await deliverOnly(env, products.map((p) => unit(p.id)));
+    expect(swell.put).not.toHaveBeenCalled();
+    expect(env.outbox.size).toBe(3);
+    await env.outbox.send();
+    expect(batchesOf(swell)).toHaveLength(1);
+    expect(appFields('p3')).toMatchObject({ sync_state: 'sent' });
+  });
+
+  it('uses products the caller read', async () => {
+    const { env, swell, google } = setup([]);
+    await deliverOnly(env, [unit('p1')], new Map([['p1', mug() as SwellProduct]]));
+    expect(swell.get).not.toHaveBeenCalled();
+    expect(google.inputs.size).toBe(1);
   });
 
   it('reports units it never reached as untouched', async () => {

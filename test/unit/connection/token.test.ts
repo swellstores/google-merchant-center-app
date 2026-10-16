@@ -47,6 +47,16 @@ describe('accessTokenFor', () => {
     expect(connection.access_token).toBe('token-1');
   });
 
+  it('hands a new token to the caller to save with its next write', async () => {
+    const google = createFakeGoogle();
+    const { swell } = createFakeSwell({ connection: connected({ access_token: null }) });
+    const connection = (await loadConnection(swell))!;
+    const saved: Record<string, unknown> = {};
+    expect(await accessTokenFor(testContext(swell, google.fetch), connection, (patch) => Object.assign(saved, patch))).toBe('token-1');
+    expect(saved).toEqual({ access_token: 'token-1', access_token_expires: new Date(NOW + 3600_000).toISOString() });
+    expect(swell.put).not.toHaveBeenCalled();
+  });
+
   it('marks a connection broken without wiping the key', async () => {
     const { swell } = createFakeSwell({ connection: connected({ access_token: 'old' }) });
     const ctx = testContext(swell);

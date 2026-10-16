@@ -26,6 +26,21 @@ export function quotaFromGroups(body: { quotaGroups?: QuotaGroup[] }): { minute_
 }
 
 /**
+ * Google's limits for product inserts, as a quota to store. A refusal of the
+ * key or the account (`auth`) throws; other Google errors keep the old limits
+ * (`null`), and the next run asks again.
+ */
+export async function readQuota(ctx: AppContext, token: string, accountId: string, previous?: QuotaInfo | null): Promise<QuotaInfo | null> {
+  try {
+    const limits = quotaFromGroups(await googleCall(ctx.fetch, token, listQuotas(accountId)));
+    return { ...previous, ...limits, date_checked: iso(ctx.now()) };
+  } catch (error) {
+    if (!(error instanceof GoogleApiError) || error.kind === 'auth') throw error;
+    return null;
+  }
+}
+
+/**
  * Reads Google's limits for product inserts into the state, also the one in
  * hand. Resolves with Google's refusal of the key or account, after marking
  * the connection broken; other Google errors keep the old limits.
@@ -33,10 +48,11 @@ export function quotaFromGroups(body: { quotaGroups?: QuotaGroup[] }): { minute_
 export async function refreshQuota(ctx: AppContext, connection: Connection, state: SyncState): Promise<GoogleApiError | null> {
   try {
     const token = await accessTokenFor(ctx, connection);
-    const limits = quotaFromGroups(await googleCall(ctx.fetch, token, listQuotas(connection.merchant_id!)));
-    const quota: QuotaInfo = { ...state.quota, ...limits, date_checked: iso(ctx.now()) };
-    await saveState(ctx.swell, state.id, { quota: { $set: quota } });
-    state.quota = quota;
+    const quota = await readQuota(ctx, token, connection.merchant_id!, state.quota);
+    if (quota) {
+      await saveState(ctx.swell, state.id, { quota: { $set: quota } });
+      state.quota = quota;
+    }
   } catch (error) {
     if (!(error instanceof GoogleApiError)) throw error;
     if (error.kind === 'auth') {

@@ -1,4 +1,6 @@
 import type { SwellClient } from '../context';
+import type { BatchOp } from '../swell-batch';
+import { iso } from '../time';
 
 export interface FullSyncJob {
   status: 'running' | 'done';
@@ -27,13 +29,34 @@ export interface SyncState {
 }
 
 const COLLECTION = '/sync-states';
+const FIRST = { limit: 1, sort: 'date_created asc' };
+
+export const stateRead: BatchOp = { method: 'get', url: COLLECTION, data: FIRST };
+export const stateById = (id: string): BatchOp => ({ method: 'get', url: `${COLLECTION}/${id}` });
+
+/**
+ * A patch of the state, creating the record when there is none yet. Objects
+ * (`full_sync`, `quota`) are replaced whole with `{ $set: … }` so cleared fields really clear.
+ */
+export function stateWrite(id: string | null | undefined, patch: Record<string, unknown>): BatchOp {
+  return id ? { method: 'put', url: `${COLLECTION}/${id}`, data: patch } : { method: 'post', url: COLLECTION, data: { backoff: 0, ...patch } };
+}
+
+/** A catalog sync from the first product; the first page fills in `total`. */
+export const newFullSyncJob = (now: number): FullSyncJob => ({
+  status: 'running',
+  cursor: null,
+  total: 0,
+  done: 0,
+  date_started: iso(now),
+  date_finished: null,
+});
 
 export async function loadState(swell: SwellClient): Promise<SyncState> {
-  const list = await swell.get(COLLECTION, { limit: 1, sort: 'date_created asc' });
+  const list = await swell.get(COLLECTION, FIRST);
   return list?.results?.[0] ?? (await swell.post(COLLECTION, { backoff: 0 }));
 }
 
-/** Objects (`full_sync`, `quota`) are replaced whole with `{ $set: … }` so cleared fields really clear. */
 export async function saveState(swell: SwellClient, id: string, patch: Record<string, unknown>): Promise<SyncState> {
   return swell.put(`${COLLECTION}/${id}`, patch);
 }

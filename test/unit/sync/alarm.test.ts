@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { armAlarm, loadAlarm, setAlarm } from '../../../functions/lib/sync/alarm';
+import { alarmWrite, armAlarm, loadAlarm, setAlarm } from '../../../functions/lib/sync/alarm';
 import { fixedClock, NOW, testContext } from '../../helpers/context';
 import { createFakeSwell } from '../../helpers/fake-swell';
 
@@ -47,5 +47,13 @@ describe('alarm', () => {
     const puts = swell.put.mock.calls.length;
     await setAlarm(testContext(swell), null);
     expect(swell.put.mock.calls.length).toBe(puts);
+  });
+
+  it('writes the alarm by id, creates a missing one, and skips a write that changes nothing', () => {
+    expect(alarmWrite(null, NOW)).toEqual({ method: 'post', url: '/alarms', data: { wake_at: at(NOW) } });
+    expect(alarmWrite(null, null)).toBeNull();
+    expect(alarmWrite({ id: 'a1', wake_at: at(NOW) }, NOW + 1000)).toEqual({ method: 'put', url: '/alarms/a1', data: { wake_at: at(NOW + 1000) } });
+    expect(alarmWrite({ id: 'a1', wake_at: at(NOW) }, NOW)).toBeNull();
+    expect(alarmWrite({ id: 'a1', wake_at: null }, null)).toBeNull();
   });
 });

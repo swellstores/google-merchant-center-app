@@ -1,6 +1,7 @@
 import type { AppContext, SwellClient } from '../context';
 import { GoogleApiError, googleCall } from '../google/http';
 import { createDataSource, dataSourceName, deleteDataSource, listDataSources } from '../google/merchant';
+import type { BatchOp } from '../swell-batch';
 
 export interface Market {
   id: string;
@@ -14,12 +15,15 @@ export interface Market {
 export type MarketInput = Omit<Market, 'id' | 'data_source'>;
 
 const COLLECTION = '/markets';
+const ALL = { limit: 100, sort: 'date_created asc' };
+
+export const marketsRead: BatchOp = { method: 'get', url: COLLECTION, data: ALL };
 
 /** ISO 639-1 from a Swell locale code. */
 export const languageOf = (locale?: string | null) => (locale || 'en').split(/[-_]/)[0].toLowerCase();
 
 export async function loadMarkets(swell: SwellClient): Promise<Market[]> {
-  const list = await swell.get(COLLECTION, { limit: 100, sort: 'date_created asc' });
+  const list = await swell.get(COLLECTION, ALL);
   return list?.results ?? [];
 }
 
