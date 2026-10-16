@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
 import { checkThenActivate, type Phase, type StatusView } from './lib/connect-flow';
 import { COUNTRIES } from './lib/countries';
-import { summarizeKey } from './lib/key-file';
+import { keyStepView, NO_KEY, offerKey, replaceKey, type KeyState } from './lib/key-step';
 import { type CheckResult as Check, stepStates } from './lib/steps';
 import { Button, Card, ExternalLink, Label, Modal, Notice, Pill, Root, Step } from './lib/ui';
 
@@ -18,7 +18,8 @@ export default function GoogleConnect(props: ComponentProps) {
   const [view, setView] = useState<StatusView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Phase | 'disconnecting' | null>(null);
-  const [keyText, setKeyText] = useState('');
+  const [key, setKey] = useState<KeyState>(NO_KEY);
+  const [draft, setDraft] = useState('');
   const [merchantId, setMerchantId] = useState('');
   const [country, setCountry] = useState('US');
   const [linkTemplate, setLinkTemplate] = useState('');
@@ -44,22 +45,21 @@ export default function GoogleConnect(props: ComponentProps) {
 
   useEffect(load, [props.fetch]);
 
-  const summary = keyText ? summarizeKey(keyText) : null;
-  const email = summary && 'clientEmail' in summary ? summary.clientEmail : view?.connection.client_email;
+  const email = key.email ?? view?.connection.client_email;
 
   async function connect() {
     setError(null);
     try {
       const next = await checkThenActivate(
         (body) => callRoute(props.fetch, 'connection', body),
-        { key: keyText || undefined, merchant_id: merchantId.trim(), country, link_template: linkTemplate.trim() },
+        { key: key.text || undefined, merchant_id: merchantId.trim(), country, link_template: linkTemplate.trim() },
         {
           phase: setBusy,
           checked: (answer) => {
             setChecks(answer.report.checks);
             setAllOk(answer.report.ok);
             setView((current) => current && { ...current, connection: answer.connection });
-            if (answer.report.ok) setKeyText('');
+            if (answer.report.ok) setKey(NO_KEY);
           },
         },
       );
@@ -109,10 +109,18 @@ export default function GoogleConnect(props: ComponentProps) {
   async function readKeyFile(file: File | undefined) {
     if (!file) return;
     try {
-      setKeyText(await file.text());
+      const text = await file.text();
+      setKey((current) => offerKey(current, text));
     } catch (e) {
       setError(messageOf(e));
     }
+  }
+
+  function pasteKey(text: string) {
+    const next = offerKey(key, text);
+    setKey(next);
+    // A key that arrived leaves the box empty for the next one.
+    setDraft(next.email && next.text === text ? '' : text);
   }
 
   async function chooseFile(event: Event) {
@@ -143,7 +151,12 @@ export default function GoogleConnect(props: ComponentProps) {
   const connected = status === 'connected';
   const failedCheck = checks.some((check) => !check.ok);
   const states = stepStates(checks, allOk);
-  const storedKey = view.connection.has_key;
+  const keyView = keyStepView(key, view.connection.has_key);
+  const replaceButton = keyView.replace && (
+    <Button kind="text" onClick={() => setKey(replaceKey)}>
+      {keyView.replace}
+    </Button>
+  );
 
   const guide = (
     <div class="gmc-steps">
@@ -160,40 +173,50 @@ export default function GoogleConnect(props: ComponentProps) {
         <div class="gmc-links">
           <ExternalLink href="https://console.cloud.google.com/iam-admin/serviceaccounts">Service accounts</ExternalLink>
         </div>
-        <label
-          class={`gmc-drop${dragging ? ' over' : ''}`}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDragging(true);
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={dropFile}
-        >
-          <input type="file" accept="application/json,.json" onChange={chooseFile} />
-          Drop the JSON key here, or click to choose a file
-        </label>
-        <details>
-          <summary>Paste the key instead</summary>
-          <textarea
-            class="gmc-input"
-            rows={3}
-            aria-label="Service account key (JSON)"
-            value={keyText}
-            placeholder='{"type": "service_account", …}'
-            onInput={(event) => setKeyText(value(event))}
-            style={{ marginTop: 8, fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12 }}
-          />
-        </details>
-        {summary && 'clientEmail' in summary && (
+        {keyView.chip && (
           <div class="gmc-actions">
-            <Pill tone="ok">Key of {summary.clientEmail}</Pill>
-            <Button kind="text" onClick={() => setKeyText('')}>
+            <Pill tone="ok">{keyView.chip}</Pill>
+            {replaceButton}
+            <Button kind="danger-text" onClick={() => setKey(NO_KEY)}>
               Remove
             </Button>
           </div>
         )}
-        {summary && 'error' in summary && <Notice tone="bad">{summary.error}</Notice>}
-        {!keyText && storedKey && <span class="gmc-muted">A key is stored. Leave this empty to keep it.</span>}
+        {keyView.stored && (
+          <div class="gmc-actions">
+            <span class="gmc-muted">A key is stored.</span>
+            {replaceButton}
+          </div>
+        )}
+        {keyView.inputs && (
+          <>
+            <label
+              class={`gmc-drop${dragging ? ' over' : ''}`}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={dropFile}
+            >
+              <input type="file" accept="application/json,.json" onChange={chooseFile} />
+              Drop the JSON key here, or click to choose a file
+            </label>
+            <details>
+              <summary>Paste the key instead</summary>
+              <textarea
+                class="gmc-input"
+                rows={3}
+                aria-label="Service account key (JSON)"
+                value={draft}
+                placeholder='{"type": "service_account", …}'
+                onInput={(event) => pasteKey(value(event))}
+                style={{ marginTop: 8, fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12 }}
+              />
+            </details>
+          </>
+        )}
+        {key.error && <Notice tone="bad">{key.error}</Notice>}
       </Step>
 
       <Step number={3} title="Merchant Center access" {...states.access}>

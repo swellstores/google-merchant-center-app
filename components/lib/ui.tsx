@@ -54,8 +54,8 @@ const CSS = `
 .gmc-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .gmc-btn.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
 .gmc-btn.danger { color: var(--bad); border-color: var(--bad); }
-.gmc-btn.text { border-color: transparent; background: transparent; padding: 7px 8px; }
-.gmc-btn.text.danger { border-color: transparent; }
+.gmc-btn.text { border-color: transparent; background: transparent; padding: 7px 8px; color: var(--accent); }
+.gmc-btn.text.danger { border-color: transparent; color: var(--bad); }
 .gmc-btn.text:hover:not(:disabled) { background: var(--subtle); }
 .gmc-btn:disabled { cursor: default; opacity: .6; }
 .gmc-label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
