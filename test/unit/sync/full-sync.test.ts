@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Market } from '../../../functions/lib/connection/markets';
-import { Outbox } from '../../../functions/lib/swell-batch';
+import { Outbox, swellBatch } from '../../../functions/lib/swell-batch';
 import type { DeliveryEnv } from '../../../functions/lib/sync/deliver';
-import { fullSyncPass, JOB_PAGE } from '../../../functions/lib/sync/full-sync';
+import { fullSyncPass, JOB_PAGE, pageRead } from '../../../functions/lib/sync/full-sync';
 import { takeQueue } from '../../../functions/lib/sync/queue';
 import { newFullSyncJob, stateById } from '../../../functions/lib/sync/state';
 import { Budget } from '../../../functions/lib/time';
@@ -41,8 +41,9 @@ describe('catalog sync', () => {
     const products = [product(1), product(2)];
     const { env, swell, collections } = setup(products);
     const pass = await fullSyncPass(env, newFullSyncJob(NOW));
-    expect(swell.get).toHaveBeenCalledTimes(1);
-    expect(swell.get).toHaveBeenCalledWith('/products', expect.objectContaining({ sort: 'id asc', expand: ['variants:1000'] }));
+    expect(swell.get).not.toHaveBeenCalled();
+    const [read] = batchesOf(swell);
+    expect(read).toEqual([{ method: 'get', url: '/products', data: { sort: 'id asc', limit: JOB_PAGE, expand: ['variants:1000'] } }]);
     expect(pass.job).toMatchObject({ status: 'done', total: 2, done: 2 });
     expect(collections['/products'].every((p) => p.$app?.google_merchant_center?.sync_state === 'sent')).toBe(true);
   });
@@ -52,7 +53,32 @@ describe('catalog sync', () => {
     collections['/sync-states'].push({ id: 's1', backoff: 0 });
     const pass = await fullSyncPass(env, newFullSyncJob(NOW), [stateById('s1')]);
     expect(pass.answers).toEqual([expect.objectContaining({ id: 's1' })]);
-    expect(batchesOf(swell).map((batch) => batch.map((op) => op.method))).toEqual([['put', 'get']]);
+    expect(batchesOf(swell).map((batch) => batch.map((op) => op.method))).toEqual([['get'], ['put', 'get']]);
+  });
+
+  it('reads the page with the writes that wait, and takes a page the caller read', async () => {
+    const { env, swell } = setup([product(1)]);
+    env.outbox.add({ method: 'delete', url: '/queue-items/q1' });
+    await fullSyncPass(env, newFullSyncJob(NOW));
+    expect(batchesOf(swell)[0].map((op) => op.method)).toEqual(['delete', 'get']);
+
+    const job = newFullSyncJob(NOW);
+    const [page] = await swellBatch(swell, [pageRead(job)]);
+    swell.post.mockClear();
+    expect((await fullSyncPass(env, job, [], page)).progressed).toBe(true);
+    expect(batchesOf(swell).map((batch) => batch.map((op) => op.method))).toEqual([['put']]);
+  });
+
+  it('leaves a page none of which went out, without a round trip', async () => {
+    // Clock reads 4 s apart: the first batch already starts past its reserve.
+    const { env, swell, google } = setup([product(1), product(2)], {}, steppingClock(undefined, 4000));
+    const job = newFullSyncJob(NOW);
+    const [page] = await swellBatch(swell, [pageRead(job)]);
+    swell.post.mockClear();
+    const pass = await fullSyncPass(env, job, [stateById('s1')], page);
+    expect(google.batches()).toBe(0);
+    expect(pass).toEqual({ job, sentOps: 0, progressed: false, answers: [] });
+    expect(swell.post).not.toHaveBeenCalled();
   });
 
   it('does not move past a product that was kept', async () => {

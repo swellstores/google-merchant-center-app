@@ -54,14 +54,22 @@ export function recordOf<T>(answer: unknown, what: string): T | null {
   return (answer as T | null) ?? null;
 }
 
+/** A batch runs this many operations at a time on the server; each such wave costs about a round trip. */
+export const SWELL_WAVE = 10;
+
 /** Writes that wait for the next round trip to Swell. */
 export class Outbox {
   private ops: BatchOp[] = [];
 
   constructor(private readonly swell: SwellClient) {}
 
+  /** A put to a record that already has one waiting joins it: one batch runs its entries in parallel. */
   add(...ops: BatchOp[]): void {
-    this.ops.push(...ops);
+    for (const op of ops) {
+      const waiting = op.method === 'put' ? this.ops.find((other) => other.method === 'put' && other.url === op.url) : undefined;
+      if (waiting) waiting.data = { ...waiting.data, ...op.data };
+      else this.ops.push({ ...op });
+    }
   }
 
   get size(): number {

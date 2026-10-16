@@ -5,7 +5,7 @@ import { classifyGoogleError, errorMessage, GoogleApiError } from '../google/htt
 import { deleteProductInput, insertProductInput, patchProductInput, type ProductAttributes } from '../google/merchant';
 import { buildOffers, marketOfInput, parseInputId, type OfferDefaults, type SkipReason } from '../mapping/offers';
 import type { GoogleFields, SwellProduct } from '../mapping/types';
-import type { Outbox } from '../swell-batch';
+import { listOf, type BatchOp, type Outbox } from '../swell-batch';
 import { iso, type Budget } from '../time';
 import type { WorkUnit } from './queue';
 
@@ -36,8 +36,11 @@ export interface DeliveryReport {
   short?: boolean;
 }
 
-/** Time a batch needs, so the run never starts one it cannot finish. */
-export const SEND_RESERVE_MS = 2500;
+/**
+ * Products a pass sends: its writes and the reads that settle it fit one
+ * server wave of `/:batch` (10 operations), about one Swell round trip.
+ */
+export const PASS_PRODUCTS = 7;
 export const LIGHT_MASK: (keyof ProductAttributes)[] = ['price', 'salePrice', 'availability'];
 
 interface Op {
@@ -57,10 +60,22 @@ interface Plan {
   carried: string[];
 }
 
+/** The products a delivery of these units needs: deleted products need none. */
+export const productIdsOf = (units: WorkUnit[]) => units.filter((unit) => unit.kind !== 'delete').map((unit) => unit.productId);
+
+export const productsRead = (ids: string[]): BatchOp => ({
+  method: 'get',
+  url: '/products',
+  data: { where: { id: { $in: ids } }, expand: ['variants:1000'], limit: ids.length },
+});
+
+export function productsOf(answer: unknown): Map<string, SwellProduct> {
+  return new Map(listOf<SwellProduct>(answer, 'the products').map((product): [string, SwellProduct] => [product.id, product]));
+}
+
 async function readProducts(env: DeliveryEnv, ids: string[]): Promise<Map<string, SwellProduct>> {
   if (!ids.length) return new Map();
-  const list = await env.ctx.swell.get('/products', { where: { id: { $in: ids } }, expand: ['variants:1000'], limit: ids.length });
-  return new Map((list?.results ?? []).map((p: SwellProduct): [string, SwellProduct] => [p.id, p]));
+  return productsOf(await env.ctx.swell.get('/products', productsRead(ids).data));
 }
 
 function planUnit(env: DeliveryEnv, unit: WorkUnit, product: SwellProduct | null): Plan {
@@ -197,7 +212,7 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
  * has them already.
  */
 export async function deliver(env: DeliveryEnv, units: WorkUnit[], read?: Map<string, SwellProduct>): Promise<DeliveryReport> {
-  const products = read ?? (await readProducts(env, units.filter((u) => u.kind !== 'delete').map((u) => u.productId)));
+  const products = read ?? (await readProducts(env, productIdsOf(units)));
   const plans = units.map((unit) => planUnit(env, unit, products.get(unit.productId) ?? null));
   const ops = plans.flatMap((plan) => plan.ops);
 
@@ -205,7 +220,8 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[], read?: Map<st
   const attempted = new Set<string>();
   let failure: GoogleApiError | undefined;
   for (let i = 0; i < ops.length && !failure; i += MAX_BATCH_PARTS) {
-    if (!env.budget.has(SEND_RESERVE_MS)) break;
+    // A batch is worth sending with time for its answer to be written and the run to end.
+    if (!env.budget.allows(2)) break;
     const parts = ops.slice(i, i + MAX_BATCH_PARTS).map((op) => op.part);
     parts.forEach((part) => attempted.add(part.id));
     try {

@@ -1,17 +1,20 @@
 import { ensureDataSources, marketsRead, type Market } from '../connection/markets';
 import { connectionRead, connectionWrite, type Connection } from '../connection/store';
 import { accessTokenFor, brokenPatch } from '../connection/token';
-import type { AppContext } from '../context';
+import { measured, type AppContext } from '../context';
 import { GoogleApiError } from '../google/http';
 import type { OfferDefaults } from '../mapping/offers';
-import { countOf, entryError, listOf, Outbox, recordOf, swellBatch } from '../swell-batch';
+import type { SwellProduct } from '../mapping/types';
+import { countOf, entryError, listOf, Outbox, recordOf, SWELL_WAVE, swellBatch, type BatchOp } from '../swell-batch';
 import { Budget, iso, nextNoonUtc } from '../time';
 import { alarmRead, alarmWrite, type Alarm } from './alarm';
-import { deliver, type DeliveryEnv } from './deliver';
-import { fullSyncPass } from './full-sync';
+import { deliver, PASS_PRODUCTS, productIdsOf, productsOf, productsRead, type DeliveryEnv } from './deliver';
+import { fullSyncPass, pageRead } from './full-sync';
 import { readQuota } from './hourly';
-import { itemsRead, settleWrites, takeRead, unitsFromQueue, type QueueItem } from './queue';
+import { itemsRead, settleWrites, takeRead, unitsFromQueue, type QueueItem, type WorkUnit } from './queue';
 import { stateById, stateRead, stateWrite, type FullSyncJob, type SyncState } from './state';
+
+export { PASS_PRODUCTS };
 
 export const COURIER_BUDGET_MS = 7000;
 /** A mark older than this belongs to a run the platform killed. */
@@ -20,10 +23,7 @@ export const NEXT_RUN_MS = 15_000;
 export const MAX_BACKOFF_MS = 15 * 60_000;
 /** Clock skew allowed between a run and the time it was asked to come at. */
 export const EARLY_TOLERANCE_MS = 2000;
-/** A product read and one Google batch: no pass starts with less time left. */
-export const PASS_RESERVE_MS = 2500;
 
-const QUEUE_TAKE = 50;
 // Phase 1 has no settings for defaults yet (plan 3 adds them).
 const DEFAULTS: OfferDefaults = { condition: 'new' };
 
@@ -38,14 +38,12 @@ export function pacedDelay(sentOps: number, minuteLimit?: number | null): number
   return Math.max(NEXT_RUN_MS, Math.ceil((sentOps / minuteLimit) * 60_000));
 }
 
-/** What a working run knows, and what it writes at its end. */
+/** What a working run knows. */
 interface Run {
   ctx: AppContext;
   budget: Budget;
   outbox: Outbox;
   connection: Connection;
-  /** A refreshed token, saved with the run's last writes */
-  connectionPatch: Partial<Connection>;
   state: SyncState;
   quotaChanged: boolean;
   alarm: Alarm | null;
@@ -54,9 +52,13 @@ interface Run {
   queue: QueueItem[];
   /** Items behind the head */
   waiting: number;
+  /** The answer to the first pass's read, made with the run mark */
+  prefetched?: unknown;
   /** The state as the last round trip of the run read it */
   latest?: SyncState | null;
 }
+
+type Ending = Pick<Run, 'ctx' | 'state' | 'outbox' | 'connection' | 'alarm' | 'quotaChanged' | 'latest'>;
 
 interface WorkResult {
   sent: number;
@@ -67,7 +69,7 @@ interface WorkResult {
 
 /** Everything a run decides on, in one round trip. */
 async function readStart(ctx: AppContext) {
-  const answers = await swellBatch(ctx.swell, [connectionRead, stateRead, alarmRead, marketsRead, takeRead(QUEUE_TAKE)]);
+  const answers = await swellBatch(ctx.swell, [connectionRead, stateRead, alarmRead, marketsRead, takeRead(PASS_PRODUCTS)]);
   const queue = listOf<QueueItem>(answers[4], 'the queue');
   return {
     connection: listOf<Connection>(answers[0], 'the connection')[0] ?? null,
@@ -90,13 +92,27 @@ function idleReset(state: SyncState | null): Record<string, unknown> | null {
   return Object.keys(patch).length ? patch : null;
 }
 
+/** The read the first pass needs: the queue head's products, or the catalog's next page. */
+function firstRead(queue: QueueItem[], job: FullSyncJob | null | undefined): BatchOp | null {
+  if (queue.length) {
+    const ids = productIdsOf(unitsFromQueue(queue));
+    return ids.length ? productsRead(ids) : null;
+  }
+  return job?.status === 'running' ? pageRead(job) : null;
+}
+
+/** A store too slow for a pass is worth a line in the function log. */
+const reportSlow = (budget: Budget) =>
+  console.warn(`Courier: no time for a pass (Swell ${budget.swellMs} ms per round trip, Google ${budget.googleMs} ms per call)`);
+
 async function work(run: Run): Promise<WorkResult> {
   const { ctx, connection, state, budget, outbox } = run;
   let sent = 0;
   let failure: GoogleApiError | undefined;
   let job = state.full_sync;
+  let passes = 0;
 
-  const token = await accessTokenFor(ctx, connection, (patch) => Object.assign(run.connectionPatch, patch));
+  const token = await accessTokenFor(ctx, connection, (patch) => outbox.add(connectionWrite(connection.id, patch)));
   // Pacing needs the per-minute limit from the first run on.
   if (!state.quota?.date_checked) {
     const quota = await readQuota(ctx, token, connection.merchant_id!, state.quota);
@@ -108,38 +124,61 @@ async function work(run: Run): Promise<WorkResult> {
   const markets = await ensureDataSources(ctx, token, connection.merchant_id!, run.markets);
   const env: DeliveryEnv = { ctx, accountId: connection.merchant_id!, token, markets, defaults: DEFAULTS, budget, outbox };
   const reread = stateById(state.id);
+  /** A pass needs its remaining Swell round trips, the run's end included, and a Google call. */
+  const gate = (trips: number) => {
+    if (budget.allows(trips)) return true;
+    if (!passes) reportSlow(budget);
+    return false;
+  };
 
-  // Fresh changes go first. Each pass sends its writes with the reads that
-  // settle it; the settling writes wait for the next round trip.
+  // Fresh changes go first. A pass reads its products (with the writes that
+  // wait), sends them, then writes the results with the reads that settle the
+  // pass and, when they fit in the same server wave, the next items.
   let items = run.queue;
   let waiting = run.waiting;
+  let products: Map<string, SwellProduct> | undefined;
+  if (items.length) products = run.prefetched === undefined ? new Map() : productsOf(run.prefetched);
   let left = false;
   const taken: string[] = [];
-  while (items.length && budget.has(PASS_RESERVE_MS)) {
+  while (items.length && gate(products ? 2 : 3)) {
+    const units: WorkUnit[] = unitsFromQueue(items);
     const ids = items.map((item) => item.id);
+    if (!products) {
+      const wanted = productIdsOf(units);
+      products = wanted.length ? productsOf((await outbox.send([productsRead(wanted)]))[0]) : new Map();
+    }
     taken.push(...ids);
-    const report = await deliver(env, unitsFromQueue(items));
-    const [current, latest] = await outbox.send([itemsRead(ids), reread]);
-    run.latest = recordOf<SyncState>(latest, 'the sync state');
-    const settled = settleWrites(ctx, report.done, report.kept, listOf<QueueItem>(current, 'the taken queue items'));
-    outbox.add(...settled.writes);
     items = [];
+    passes++;
+    const report = await deliver(env, units, products);
+    products = undefined;
     sent += report.sentOps;
     failure = report.failure;
+    // Nothing went out: no round trip, and the items stay for the next run.
+    if (report.untouched.length === units.length) {
+      left = true;
+      break;
+    }
+    const next = waiting > 0 && outbox.size + 3 <= SWELL_WAVE;
+    const answers = await outbox.send([itemsRead(ids), reread, ...(next ? [takeRead(PASS_PRODUCTS, taken)] : [])]);
+    run.latest = recordOf<SyncState>(answers[1], 'the sync state');
+    const settled = settleWrites(ctx, report.done, report.kept, listOf<QueueItem>(answers[0], 'the taken queue items'));
+    outbox.add(...settled.writes);
     left ||= settled.removed.length < ids.length;
     // Kept units wait for the next run: no retries in the same run.
-    if (failure || report.kept.length || report.untouched.length || !waiting || !budget.has(PASS_RESERVE_MS)) break;
-    const [next] = await outbox.send([takeRead(QUEUE_TAKE, taken)]);
-    items = listOf<QueueItem>(next, 'the queue');
-    waiting = countOf(next) - items.length;
+    if (failure || report.kept.length || report.untouched.length || !next) break;
+    items = listOf<QueueItem>(answers[2], 'the queue');
+    waiting = countOf(answers[2]) - items.length;
   }
   const queueMore = left || items.length > 0 || waiting > 0;
 
-  while (!failure && !queueMore && job?.status === 'running' && budget.has(PASS_RESERVE_MS)) {
-    // Settled items leave before the hand-off looks at the queue.
-    if (outbox.size) await outbox.send();
-    const pass = await fullSyncPass(env, job, [reread]);
-    run.latest = recordOf<SyncState>(pass.answers[0], 'the sync state');
+  // Without the page in hand, a pass reads it with the writes that wait.
+  let page = run.queue.length ? undefined : run.prefetched;
+  while (!failure && !queueMore && job?.status === 'running' && gate(page === undefined ? 3 : 2)) {
+    passes++;
+    const pass = await fullSyncPass(env, job, [reread], page);
+    page = undefined;
+    if (pass.answers.length) run.latest = recordOf<SyncState>(pass.answers[0], 'the sync state');
     sent += pass.sentOps;
     failure = pass.failure;
     job = pass.job;
@@ -149,7 +188,7 @@ async function work(run: Run): Promise<WorkResult> {
 }
 
 /** The run's last round trip: the state, the next alarm and whatever still waits, in one batch. */
-async function finish(run: Run, result: WorkResult): Promise<CourierOutcome> {
+async function finish(run: Ending, result: WorkResult): Promise<CourierOutcome> {
   const { ctx, state, outbox } = run;
   const { sent, failure, queueMore } = result;
   const patch: Record<string, unknown> = { running_since: null };
@@ -165,7 +204,7 @@ async function finish(run: Run, result: WorkResult): Promise<CourierOutcome> {
   let outcome: CourierOutcome;
   if (failure?.kind === 'auth') {
     Object.assign(patch, { not_before: null, last_error: failure.message });
-    Object.assign(run.connectionPatch, brokenPatch(failure.message));
+    outbox.add(connectionWrite(run.connection.id, brokenPatch(failure.message)));
     at = null;
     outcome = { next: 'idle', sent };
   } else if (failure?.kind === 'daily_quota') {
@@ -187,7 +226,6 @@ async function finish(run: Run, result: WorkResult): Promise<CourierOutcome> {
     outcome = { next: 'idle', sent };
   }
 
-  if (Object.keys(run.connectionPatch).length) outbox.add(connectionWrite(run.connection.id, run.connectionPatch));
   const alarm = alarmWrite(run.alarm, at);
   if (alarm) outbox.add(alarm);
   // A refused state write fails the run; the dead-man alarm brings the next one.
@@ -198,11 +236,14 @@ async function finish(run: Run, result: WorkResult): Promise<CourierOutcome> {
 
 /**
  * One courier run: the queue, then the catalog sync, within a 7 s budget.
- * Reads everything in one round trip, marks the run in another, and ends by
- * setting the alarm for the next run, or clearing it when idle.
+ * Reads everything in one round trip, marks the run with the first pass's
+ * read in another, starts a pass only with time for its round trips at the
+ * slowest measured, and ends by setting the alarm for the next run, or
+ * clearing it when idle.
  */
-export async function runCourier(ctx: AppContext): Promise<CourierOutcome> {
-  const budget = new Budget(ctx.now, COURIER_BUDGET_MS);
+export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
+  const budget = new Budget(appCtx.now, COURIER_BUDGET_MS);
+  const ctx = measured(appCtx, budget);
   const start = await readStart(ctx);
   const outbox = new Outbox(ctx.swell);
   const { connection, state, alarm } = start;
@@ -231,26 +272,37 @@ export async function runCourier(ctx: AppContext): Promise<CourierOutcome> {
     return { next: 'idle', sent: 0 };
   }
 
+  // The mark with the first read, the pass's writes and the end: a run without
+  // time for them only asks to come back.
+  if (!budget.allows(3)) {
+    reportSlow(budget);
+    const ending: Ending = { ctx, state: state ?? ({} as SyncState), outbox, connection, alarm, quotaChanged: false };
+    return finish(ending, { sent: 0, queueMore: true, job: state?.full_sync });
+  }
+
   // A run killed at 10 s leaves no future run; the dead-man alarm comes after
   // the mark expires and finds the next run already working (busy/early) or
   // picks the work up. The ending's alarm write supersedes it in wake_at.
   const deadManAt = now + RUNNING_TTL_MS + 5000;
   const deadMan = alarmWrite(alarm, deadManAt);
-  const [marked, armed] = await swellBatch(ctx.swell, [stateWrite(state?.id, { running_since: iso(now) }), ...(deadMan ? [deadMan] : [])]);
-  const current = recordOf<SyncState>(marked, 'the run mark');
+  const read = firstRead(start.queue, state?.full_sync);
+  const marking: BatchOp[] = [stateWrite(state?.id, { running_since: iso(now) }), ...(deadMan ? [deadMan] : []), ...(read ? [read] : [])];
+  const answers = await swellBatch(ctx.swell, marking);
+  const current = recordOf<SyncState>(answers[0], 'the run mark');
   if (!current?.id) throw new Error('Swell did not keep the run mark');
+  const armed = deadMan ? answers[1] : undefined;
   const run: Run = {
     ctx,
     budget,
     outbox,
     connection,
-    connectionPatch: {},
     state: current,
     quotaChanged: false,
     alarm: deadMan && !entryError(armed) ? { id: (armed as Alarm | null)?.id ?? alarm!.id, wake_at: iso(deadManAt) } : alarm,
     markets: start.markets,
     queue: start.queue,
     waiting: start.waiting,
+    prefetched: read ? answers[marking.length - 1] : undefined,
   };
 
   let result: WorkResult;
@@ -259,11 +311,9 @@ export async function runCourier(ctx: AppContext): Promise<CourierOutcome> {
   } catch (error) {
     if (!(error instanceof GoogleApiError)) {
       const retryAt = ctx.now() + NEXT_RUN_MS;
-      outbox.add(stateWrite(current.id, { running_since: null, not_before: iso(retryAt) }));
-      if (Object.keys(run.connectionPatch).length) outbox.add(connectionWrite(connection.id, run.connectionPatch));
       const rearm = alarmWrite(run.alarm, retryAt);
       if (rearm) outbox.add(rearm);
-      await outbox.send().catch(() => undefined);
+      await outbox.send([stateWrite(current.id, { running_since: null, not_before: iso(retryAt) })]).catch(() => undefined);
       throw error;
     }
     result = { sent: 0, failure: error, queueMore: true, job: current.full_sync };

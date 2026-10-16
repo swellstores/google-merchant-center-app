@@ -1,12 +1,19 @@
 import type { GoogleApiError } from '../google/http';
 import type { SwellProduct } from '../mapping/types';
-import { listOf, type BatchOp } from '../swell-batch';
+import { countOf, listOf, type BatchOp } from '../swell-batch';
 import { iso } from '../time';
-import { deliver, type DeliveryEnv } from './deliver';
+import { deliver, PASS_PRODUCTS, type DeliveryEnv } from './deliver';
 import { enqueueWrite, productItemsRead, type QueueItem, type WorkUnit } from './queue';
 import type { FullSyncJob } from './state';
 
-export const JOB_PAGE = 25;
+export const JOB_PAGE = PASS_PRODUCTS;
+
+/** The next page of the catalog, with the products' variants. */
+export const pageRead = (job: FullSyncJob): BatchOp => ({
+  method: 'get',
+  url: '/products',
+  data: { ...(job.cursor ? { where: { id: { $gt: job.cursor } } } : {}), sort: 'id asc', limit: JOB_PAGE, expand: ['variants:1000'] },
+});
 
 export interface PassResult {
   job: FullSyncJob;
@@ -24,19 +31,17 @@ export interface PassResult {
  * continues them across runs, also when some products' parts failed: one
  * product Google keeps failing never stalls the sync. A whole batch that
  * failed, or a refused key or quota, moves it only over the leading done
- * products. One round trip after Google's answer sends the waiting writes and
- * reads what the hand-off needs along with the caller's `reads`; the hand-off
- * waits in `env.outbox`.
+ * products; a page none of which went out stays for the next run.
+ *
+ * `page` is the answer to `pageRead(job)` when the caller has it; otherwise
+ * the page is read with the writes that wait. One round trip after Google's
+ * answer sends the writes and reads what the hand-off needs along with the
+ * caller's `reads`; the hand-off waits in `env.outbox`.
  */
-export async function fullSyncPass(env: DeliveryEnv, job: FullSyncJob, reads: BatchOp[] = []): Promise<PassResult> {
-  const page = await env.ctx.swell.get('/products', {
-    ...(job.cursor ? { where: { id: { $gt: job.cursor } } } : {}),
-    sort: 'id asc',
-    limit: JOB_PAGE,
-    expand: ['variants:1000'],
-  });
-  const products: SwellProduct[] = page?.results ?? [];
-  const total = job.cursor === null && !job.total ? (page?.count ?? 0) : job.total;
+export async function fullSyncPass(env: DeliveryEnv, job: FullSyncJob, reads: BatchOp[] = [], page?: unknown): Promise<PassResult> {
+  const answer = page === undefined ? (await env.outbox.send([pageRead(job)]))[0] : page;
+  const products = listOf<SwellProduct>(answer, 'the catalog page');
+  const total = job.cursor === null && !job.total ? countOf(answer) : job.total;
   if (!products.length) {
     const answers = await env.outbox.send(reads);
     return { job: { ...job, total, status: 'done', date_finished: iso(env.ctx.now()) }, sentOps: 0, progressed: true, answers };
@@ -48,6 +53,7 @@ export async function fullSyncPass(env: DeliveryEnv, job: FullSyncJob, reads: Ba
     ids.map((productId) => ({ productId, kind: 'full' as const, inputIds: [], queueItemIds: [], attempts: 0 })),
     new Map(products.map((product): [string, SwellProduct] => [product.id, product])),
   );
+  if (report.untouched.length === ids.length) return { job, sentOps: 0, progressed: false, answers: [] };
   const finished = new Set(report.done.map((unit) => unit.productId));
   let cursor = job.cursor;
   let done = job.done;
