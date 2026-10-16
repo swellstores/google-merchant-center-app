@@ -1,5 +1,6 @@
 import { buildOffers } from '../../functions/lib/mapping/offers';
 import type { SwellProduct, SwellVariant } from '../../functions/lib/mapping/types';
+import { marketHeading } from './status-view';
 import { skippedStatus } from '../../functions/lib/status/product-status';
 
 /** Mirrors `PreviewContext` in functions/lib/admin/product-status.ts. */
@@ -11,6 +12,8 @@ export interface PreviewContext {
 
 export interface PreviewCard {
   market: string;
+  heading: string;
+  offerId: string;
   variant: string | null;
   title: string;
   price: string;
@@ -49,13 +52,18 @@ export function previewModel(record: SwellProduct, context: PreviewContext): Pre
   if (!context.markets.length) return { cards: [] };
   const markets = context.markets.map((m) => ({ ...m, id: '', data_source: 'preview' }));
   const { offers, skipped } = buildOffers(record, markets, { appId: context.app_id, defaults: context.defaults, version: '0' });
-  if (skipped) return { skipped: skippedStatus(skipped).label };
+  if (skipped) {
+    const { status, label } = skippedStatus(skipped);
+    return { skipped: status === 'excluded' ? label : `${label}. This product will not appear in Google Shopping.` };
+  }
   const names = variantNames(record);
   return {
     cards: offers.map(({ market, input }) => {
       const a = input.productAttributes;
       return {
         market: `${market.country} ${market.language}`,
+        heading: marketHeading(`${market.country} ${market.language}`),
+        offerId: input.offerId,
         variant: names.get(input.offerId) ?? null,
         title: a.title ?? '',
         price: formatted(a.price!),
@@ -67,4 +75,9 @@ export function previewModel(record: SwellProduct, context: PreviewContext): Pre
       };
     }),
   };
+}
+
+/** The merchant's pick by offer id; the first offer when it is gone. */
+export function pickedCard(cards: PreviewCard[], offerId: string | undefined): PreviewCard {
+  return cards.find((c) => c.offerId === offerId) ?? cards[0];
 }

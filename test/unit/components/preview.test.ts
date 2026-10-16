@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { previewModel, type PreviewContext } from '../../../components/lib/preview';
+import { pickedCard, previewModel, type PreviewContext } from '../../../components/lib/preview';
 import type { SwellProduct } from '../../../functions/lib/mapping/types';
 
 const CONTEXT: PreviewContext = {
@@ -22,8 +22,8 @@ describe('previewModel', () => {
     const model = previewModel(product(), CONTEXT);
     expect(model).toEqual({
       cards: [
-        { market: 'US en', variant: null, title: 'Mug', price: '$12.50', salePrice: null, availability: 'In stock', image: 'https://cdn.example.com/a.jpg', host: 'shop.example.com', link: 'https://shop.example.com/mug' },
-        { market: 'DE de', variant: null, title: 'Mug', price: '€12.50', salePrice: null, availability: 'In stock', image: 'https://cdn.example.com/a.jpg', host: 'shop.example.de', link: 'https://shop.example.de/de/mug?v=' },
+        { market: 'US en', heading: 'United States · en', offerId: 'p1', variant: null, title: 'Mug', price: '$12.50', salePrice: null, availability: 'In stock', image: 'https://cdn.example.com/a.jpg', host: 'shop.example.com', link: 'https://shop.example.com/mug' },
+        { market: 'DE de', heading: 'Germany · de', offerId: 'p1', variant: null, title: 'Mug', price: '€12.50', salePrice: null, availability: 'In stock', image: 'https://cdn.example.com/a.jpg', host: 'shop.example.de', link: 'https://shop.example.de/de/mug?v=' },
       ],
     });
   });
@@ -57,8 +57,30 @@ describe('previewModel', () => {
     expect(previewModel(product({ images: [{ file: {} }] }), CONTEXT)).toEqual({ skipped: 'Not sent: no image' });
   });
 
-  it('a hidden product shows the hidden wording', () => {
+  it('hidden shows the label alone; other skips add the consequence', () => {
     expect(previewModel(product({ $app: { google_merchant_center: { excluded: true } } }), CONTEXT)).toEqual({ skipped: 'Hidden from Google' });
+    expect(previewModel(product({ images: [] }), CONTEXT)).toEqual({ skipped: 'Not sent: no image. This product will not appear in Google Shopping.' });
+  });
+
+  it('market headers carry the country name', () => {
+    const model = previewModel(product(), CONTEXT);
+    if (!('cards' in model)) throw new Error('expected cards');
+    expect(model.cards.map((c) => c.heading)).toEqual(['United States · en', 'Germany · de']);
+  });
+
+  it('the variant pick follows the offer id, not the position', () => {
+    const one = { ...CONTEXT, markets: [CONTEXT.markets[0]] };
+    const cards = (variants: { id: string; name: string }[]) => {
+      const m = previewModel(product({ variants }), one);
+      if (!('cards' in m)) throw new Error('expected cards');
+      return m.cards;
+    };
+    const before = cards([{ id: 'v1', name: 'Red' }, { id: 'v2', name: 'Blue' }]);
+    expect(pickedCard(before, 'v2').variant).toBe('Blue');
+    const after = cards([{ id: 'v2', name: 'Blue' }, { id: 'v1', name: 'Red' }]);
+    expect(pickedCard(after, 'v2').variant).toBe('Blue');
+    expect(pickedCard(after, 'gone').variant).toBe('Blue');
+    expect(pickedCard(after, undefined).offerId).toBe('v2');
   });
 
   it('a sale shows both prices', () => {

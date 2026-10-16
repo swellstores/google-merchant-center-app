@@ -1,7 +1,7 @@
 import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
-import { previewModel, type PreviewCard, type PreviewContext } from './lib/preview';
+import { pickedCard, previewModel, type PreviewCard, type PreviewContext } from './lib/preview';
 import type { SwellProduct } from '../functions/lib/mapping/types';
 import { Button, Card, Notice, Pill, Root } from './lib/ui';
 
@@ -38,17 +38,17 @@ function Offer({ card }: { card: PreviewCard }) {
   );
 }
 
-function MarketCard({ market, cards }: { market: string; cards: PreviewCard[] }) {
-  const [picked, setPicked] = useState(0);
-  const card = cards[Math.min(picked, cards.length - 1)];
+function MarketCard({ cards }: { cards: PreviewCard[] }) {
+  const [picked, setPicked] = useState<string | undefined>();
+  const card = pickedCard(cards, picked);
   return (
     <Card>
       <div class="gmc-actions">
-        <strong>{market}</strong>
+        <strong>{card.heading}</strong>
         {cards.length > 1 && (
-          <select class="gmc-input" style={{ width: 'auto' }} aria-label={`Variant for ${market}`} value={picked} onChange={(e) => setPicked(Number((e.currentTarget as HTMLSelectElement).value))}>
-            {cards.map((c, i) => (
-              <option key={i} value={i}>
+          <select class="gmc-input" style={{ width: 'auto' }} aria-label={`Variant for ${card.heading}`} value={card.offerId} onChange={(e) => setPicked((e.currentTarget as HTMLSelectElement).value)}>
+            {cards.map((c) => (
+              <option key={c.offerId} value={c.offerId}>
                 {c.variant ?? c.title}
               </option>
             ))}
@@ -113,7 +113,7 @@ export default function ShoppingPreview(props: ComponentProps) {
   if ('skipped' in model) {
     return (
       <Root>
-        <Notice tone="neutral">{model.skipped}. Google will not list this product.</Notice>
+        <Notice tone="neutral">{model.skipped}</Notice>
       </Root>
     );
   }
@@ -130,7 +130,7 @@ export default function ShoppingPreview(props: ComponentProps) {
   return (
     <Root>
       {markets.map((market) => (
-        <MarketCard key={market} market={market} cards={model.cards.filter((c) => c.market === market)} />
+        <MarketCard key={market} cards={model.cards.filter((c) => c.market === market)} />
       ))}
     </Root>
   );

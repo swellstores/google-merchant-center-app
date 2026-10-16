@@ -76,7 +76,7 @@ const COUNTRY_NAMES = new Map(COUNTRIES);
 
 const ISSUE_TONES: Record<StatusIssue['severity'], Tone> = { disapproved: 'bad', demoted: 'info', info: 'neutral' };
 
-function marketHeading(market: string): string {
+export function marketHeading(market: string): string {
   const [country, language] = market.split(' ');
   return `${COUNTRY_NAMES.get(country) ?? country}${language ? ` · ${language}` : ''}`;
 }
