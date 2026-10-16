@@ -31,7 +31,7 @@ describe('statusPanelModel', () => {
           checked_at: '2026-10-16T12:00:00Z',
           more: 2,
           offers: [
-            offer({ variant: 'Red', expires: '2026-11-15T00:00:00Z' }),
+            offer({ variant: 'Red' }),
             offer({ input_id: 'b', variant: 'Blue', status: 'disapproved', issues: [ISSUE] }),
             offer({ input_id: 'c', market: 'DE de', variant: 'Red', status: 'pending' }),
           ],
@@ -39,13 +39,13 @@ describe('statusPanelModel', () => {
       }),
       NOW,
     );
-    expect(model.headline).toEqual({ tone: 'bad', text: 'Disapproved' });
+    expect(model.headline).toEqual({ tone: 'bad', text: 'Disapproved (1 of 3)' });
     expect(model.markets.map((m) => [m.market, m.offers.map((o) => o.title)])).toEqual([
-      ['US en', ['Red', 'Blue']],
-      ['DE de', ['Red']],
+      ['US en', ['Variant: Red', 'Variant: Blue']],
+      ['DE de', ['Variant: Red']],
     ]);
-    expect(model.markets[0].offers[0]).toMatchObject({ tone: 'ok', text: 'Approved', expires: '2026-11-15' });
-    expect(model.markets[0].offers[1].issues).toEqual([ISSUE]);
+    expect(model.markets[0].offers[0]).toMatchObject({ tone: 'ok', text: 'Approved' });
+    expect(model.markets[0].offers[1].issues).toEqual([{ ...ISSUE, tone: 'bad' }]);
     expect(model.note).toBe('And 2 more offers.');
     expect(model.issues).toEqual([]);
     expect(model.canResend).toBe(true);
@@ -64,6 +64,35 @@ describe('statusPanelModel', () => {
     expect(model.issues).toEqual([ISSUE]);
     expect(model.markets).toEqual([]);
     expect(model.canResend).toBe(true);
+  });
+
+  it('the live headline counts the worst offers', () => {
+    const live = (statuses: OfferView['status'][]) =>
+      statusPanelModel(view({ live: { checked_at: '2026-10-16T11:55:00Z', more: 0, offers: statuses.map((status, i) => offer({ input_id: String(i), status })) } }), NOW);
+    expect(live(['approved', 'pending', 'pending']).headline).toEqual({ tone: 'neutral', text: 'Pending (2 of 3)' });
+    expect(live(['pending', 'pending']).headline.text).toBe('Pending');
+    expect(live(['approved', 'disapproved']).headline).toEqual({ tone: 'bad', text: 'Disapproved (1 of 2)' });
+    expect(live(['approved']).checked).toBe('Checked 5 min ago');
+    expect(statusPanelModel(view({ live: { checked_at: '2026-10-16T12:00:00Z', more: 0, offers: [offer()] } }), NOW).checked).toBe('Checked just now');
+  });
+
+  it('markets carry the country name', () => {
+    const model = statusPanelModel(view({ live: { checked_at: '2026-10-16T12:00:00Z', more: 0, offers: [offer(), offer({ market: 'ZZ en' })] } }), NOW);
+    expect(model.markets.map((m) => m.heading)).toEqual(['United States · en', 'ZZ · en']);
+  });
+
+  it('issues inside an offer carry their border tone, not a pill', () => {
+    const issues: StatusIssue[] = [ISSUE, { ...ISSUE, code: 'b', severity: 'demoted' }, { ...ISSUE, code: 'c', severity: 'info' }];
+    const model = statusPanelModel(view({ live: { checked_at: '2026-10-16T12:00:00Z', more: 0, offers: [offer({ status: 'pending', issues })] } }), NOW);
+    expect(model.markets[0].offers[0]).toMatchObject({ tone: 'neutral', text: 'Pending' });
+    expect(model.markets[0].offers[0].issues.map((i) => i.tone)).toEqual(['bad', 'info', 'neutral']);
+  });
+
+  it('an invalid date does not throw', () => {
+    const model = statusPanelModel(view({ connected: false, stored: { status: 'approved', date_status: 'not a date' } }), NOW);
+    expect(model.note).toBe('Not connected. This is the last known status.');
+    const live = statusPanelModel(view({ live: { checked_at: 'bad', more: 0, offers: [offer()] } }), NOW);
+    expect(live.checked).toBe('Checked just now');
   });
 
   it('a product never sent reads Not sent', () => {

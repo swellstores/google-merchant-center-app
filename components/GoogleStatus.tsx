@@ -1,12 +1,28 @@
 import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
-import { issueSeverity, statusPanelModel, type ProductStatusView, type StatusIssue } from './lib/status-view';
+import { issueSeverity, statusPanelModel, type OfferIssue, type ProductStatusView, type StatusIssue } from './lib/status-view';
 import { Button, Card, ExternalLink, Notice, Pill, Root } from './lib/ui';
 
 export const config = { description: 'The live Google Merchant Center status of a product' };
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+const BORDERS = { bad: 'var(--bad)', info: 'var(--info)', ok: 'var(--ok)', neutral: 'var(--muted)' };
+
+function OfferIssues({ issues }: { issues: OfferIssue[] }) {
+  return (
+    <ul class="gmc-list" style={{ marginLeft: 8 }}>
+      {issues.map((issue) => (
+        <li key={issue.code} style={{ borderLeft: `3px solid ${BORDERS[issue.tone]}`, paddingLeft: 10 }}>
+          <strong>{issue.description}</strong>
+          {issue.detail && <div class="gmc-muted">{issue.detail}</div>}
+          {issue.documentation && <ExternalLink href={issue.documentation}>Google help</ExternalLink>}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function Issues({ issues }: { issues: StatusIssue[] }) {
   return (
@@ -38,24 +54,30 @@ export default function GoogleStatus(props: ComponentProps) {
   fetchRef.current = props.fetch;
   const mounted = useRef(true);
 
-  function load() {
-    if (!id) return;
-    callRoute<ProductStatusView>(fetchRef.current, `product?id=${encodeURIComponent(id)}`)
+  const [attempt, setAttempt] = useState(0);
+
+  function fetchStatus(isCurrent: () => boolean) {
+    callRoute<ProductStatusView>(fetchRef.current, `product?id=${encodeURIComponent(id!)}`)
       .then((next) => {
-        if (!mounted.current) return;
+        if (!isCurrent()) return;
         setView(next);
         setError(null);
       })
-      .catch((e) => mounted.current && setError(messageOf(e)));
+      .catch((e) => isCurrent() && setError(messageOf(e)));
   }
 
   useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
     mounted.current = true;
-    load();
+    setView(null);
+    setError(null);
+    fetchStatus(() => !cancelled);
     return () => {
+      cancelled = true;
       mounted.current = false;
     };
-  }, [id]);
+  }, [id, attempt]);
 
   function resend() {
     setBusy(true);
@@ -65,7 +87,7 @@ export default function GoogleStatus(props: ComponentProps) {
       .then(() => {
         if (!mounted.current) return;
         setQueued(true);
-        load();
+        fetchStatus(() => mounted.current);
       })
       .catch((e) => mounted.current && setError(messageOf(e)))
       .finally(() => mounted.current && setBusy(false));
@@ -82,7 +104,20 @@ export default function GoogleStatus(props: ComponentProps) {
   if (!view) {
     return (
       <Root>
-        {error ? <Notice tone="bad">{error}</Notice> : <span class="gmc-muted" role="status">Checking Google…</span>}
+        {error ? (
+          <>
+            <Notice tone="bad">{error}</Notice>
+            <div class="gmc-actions">
+              <Button kind="text" onClick={() => setAttempt((n) => n + 1)}>
+                Try again
+              </Button>
+            </div>
+          </>
+        ) : (
+          <span class="gmc-muted" role="status">
+            Checking Google…
+          </span>
+        )}
       </Root>
     );
   }
@@ -94,20 +129,21 @@ export default function GoogleStatus(props: ComponentProps) {
       <Card>
         <div class="gmc-actions">
           <Pill tone={model.headline.tone}>{model.headline.text}</Pill>
+          {model.checked && <span class="gmc-muted">{model.checked}</span>}
         </div>
+        {view.stored.status === 'excluded' && <span class="gmc-muted">Turn off “Hide from Google” below to list it again.</span>}
         {model.note && <span class="gmc-muted">{model.note}</span>}
         {model.markets.map((group) => (
           <div key={group.market}>
-            <strong>{group.market}</strong>
+            <strong>{group.heading}</strong>
             <ul class="gmc-list">
               {group.offers.map((offer, i) => (
                 <li key={i}>
                   <div class="gmc-actions">
                     <Pill tone={offer.tone}>{offer.text}</Pill>
                     <span>{offer.title}</span>
-                    {offer.expires && <span class="gmc-muted">Expires {offer.expires}</span>}
                   </div>
-                  {offer.issues.length > 0 && <Issues issues={offer.issues} />}
+                  {offer.issues.length > 0 && <OfferIssues issues={offer.issues} />}
                 </li>
               ))}
             </ul>
