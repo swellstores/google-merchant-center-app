@@ -97,6 +97,8 @@ const CSS = `
 .gmc-bar.unknown > span { width: 30%; animation: gmc-slide 1.4s ease-in-out infinite alternate; }
 @keyframes gmc-slide { from { margin-left: 0; } to { margin-left: 70%; } }
 @media (prefers-reduced-motion: reduce) { .gmc-bar.unknown > span { animation: none; } }
+.gmc-stack { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.gmc-stack.divided > * + * { border-top: 1px solid var(--border); padding-top: 16px; }
 .gmc-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; }
 .gmc-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; }
 .gmc-modal { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 20px; width: min(480px, 90vw); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); display: flex; flex-direction: column; gap: 12px; }
@@ -127,6 +129,18 @@ export function Button(props: { kind?: 'primary' | 'secondary' | 'danger' | 'tex
     <button type="button" class={cx('gmc-btn', classes)} disabled={props.disabled} onClick={props.onClick}>
       {props.children}
     </button>
+  );
+}
+
+export type Gap = 4 | 8 | 12 | 16 | 24;
+
+/** A column with an even gap; `divided` puts a 1px rule, with the gap as padding, between the items. */
+export function Stack({ gap, divided, as = 'div', children }: { gap: Gap; divided?: boolean; as?: 'div' | 'ul'; children: ComponentChildren }) {
+  const Tag = as;
+  return (
+    <Tag class={cx('gmc-stack', divided && 'divided')} style={{ gap }}>
+      {children}
+    </Tag>
   );
 }
 

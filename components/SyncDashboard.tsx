@@ -2,7 +2,7 @@ import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
 import { dashboardModel, POLL_MS, type DashboardView } from './lib/dashboard';
-import { Button, Card, ExternalLink, Modal, Notice, Pill, Progress, Root, Stat } from './lib/ui';
+import { Button, Card, ExternalLink, Modal, Notice, Pill, Progress, Root, Stack, Stat } from './lib/ui';
 
 export const config = { description: 'Sync progress and product statuses in Google Merchant Center' };
 
@@ -125,19 +125,23 @@ export default function SyncDashboard(props: ComponentProps) {
 
       {model.issues.length > 0 && (
         <Card>
-          <h3 class="gmc-title">Top issues</h3>
-          <ul class="gmc-list">
-            {model.issues.map((issue) => (
-              <li key={issue.code}>
-                <div class="gmc-actions">
-                  <Pill tone={issue.severity.tone}>{issue.severity.label}</Pill>
-                  <strong>{issue.description}</strong>
-                </div>
-                <div class="gmc-muted">{issue.sampleText}</div>
-                {issue.documentation && <ExternalLink href={issue.documentation}>Google help</ExternalLink>}
-              </li>
-            ))}
-          </ul>
+          <Stack gap={12}>
+            <h3 class="gmc-title">Top issues</h3>
+            <Stack as="ul" gap={16} divided>
+              {model.issues.map((issue) => (
+                <li key={issue.code}>
+                  <Stack gap={4}>
+                    <div class="gmc-actions">
+                      <Pill tone={issue.severity.tone}>{issue.severity.label}</Pill>
+                      <strong>{issue.description}</strong>
+                    </div>
+                    <div class="gmc-muted">{issue.sampleText}</div>
+                    {issue.documentation && <ExternalLink href={issue.documentation}>Google help</ExternalLink>}
+                  </Stack>
+                </li>
+              ))}
+            </Stack>
+          </Stack>
         </Card>
       )}
 

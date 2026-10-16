@@ -2,7 +2,7 @@ import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
 import { issueSeverity, statusPanelModel, type OfferIssue, type ProductStatusView, type StatusIssue } from './lib/status-view';
-import { Button, Card, ExternalLink, Notice, Pill, Root } from './lib/ui';
+import { Button, Card, ExternalLink, Notice, Pill, Root, Stack } from './lib/ui';
 
 export const config = { description: 'The live Google Merchant Center status of a product' };
 
@@ -12,35 +12,39 @@ const BORDERS = { bad: 'var(--bad)', info: 'var(--info)', ok: 'var(--ok)', neutr
 
 function OfferIssues({ issues }: { issues: OfferIssue[] }) {
   return (
-    <ul class="gmc-list" style={{ marginLeft: 8 }}>
+    <Stack as="ul" gap={12}>
       {issues.map((issue) => (
-        <li key={issue.code} style={{ borderLeft: `3px solid ${BORDERS[issue.tone]}`, paddingLeft: 10 }}>
-          <strong>{issue.description}</strong>
-          {issue.detail && <div class="gmc-muted">{issue.detail}</div>}
-          {issue.documentation && <ExternalLink href={issue.documentation}>Google help</ExternalLink>}
+        <li key={issue.code} style={{ borderLeft: `3px solid ${BORDERS[issue.tone]}`, paddingLeft: 12 }}>
+          <Stack gap={4}>
+            <strong>{issue.description}</strong>
+            {issue.detail && <div class="gmc-muted">{issue.detail}</div>}
+            {issue.documentation && <ExternalLink href={issue.documentation}>Google help</ExternalLink>}
+          </Stack>
         </li>
       ))}
-    </ul>
+    </Stack>
   );
 }
 
 function Issues({ issues }: { issues: StatusIssue[] }) {
   return (
-    <ul class="gmc-list">
+    <Stack as="ul" gap={16} divided>
       {issues.map((issue) => {
         const severity = issueSeverity(issue.severity);
         return (
           <li key={issue.code}>
-            <div class="gmc-actions">
-              <Pill tone={severity.tone}>{severity.label}</Pill>
-              <strong>{issue.description}</strong>
-            </div>
-            {issue.detail && <div class="gmc-muted">{issue.detail}</div>}
-            {issue.documentation && <ExternalLink href={issue.documentation}>Google help</ExternalLink>}
+            <Stack gap={4}>
+              <div class="gmc-actions">
+                <Pill tone={severity.tone}>{severity.label}</Pill>
+                <strong>{issue.description}</strong>
+              </div>
+              {issue.detail && <div class="gmc-muted">{issue.detail}</div>}
+              {issue.documentation && <ExternalLink href={issue.documentation}>Google help</ExternalLink>}
+            </Stack>
           </li>
         );
       })}
-    </ul>
+    </Stack>
   );
 }
 
@@ -127,38 +131,48 @@ export default function GoogleStatus(props: ComponentProps) {
   return (
     <Root>
       <Card>
-        <div class="gmc-actions">
-          <Pill tone={model.headline.tone}>{model.headline.text}</Pill>
-          {model.checked && <span class="gmc-muted">{model.checked}</span>}
-        </div>
-        {view.stored.status === 'excluded' && <span class="gmc-muted">Turn off “Hide from Google” below to list it again.</span>}
-        {model.note && <span class="gmc-muted">{model.note}</span>}
-        {model.markets.map((group) => (
-          <div key={group.market}>
-            <strong>{group.heading}</strong>
-            <ul class="gmc-list">
-              {group.offers.map((offer, i) => (
-                <li key={i}>
-                  <div class="gmc-actions">
-                    <Pill tone={offer.tone}>{offer.text}</Pill>
-                    <span>{offer.title}</span>
-                  </div>
-                  {offer.issues.length > 0 && <OfferIssues issues={offer.issues} />}
-                </li>
+        <Stack gap={16}>
+          <Stack gap={4}>
+            <div class="gmc-actions">
+              <Pill tone={model.headline.tone}>{model.headline.text}</Pill>
+              {model.checked && <span class="gmc-muted">{model.checked}</span>}
+            </div>
+            {view.stored.status === 'excluded' && <span class="gmc-muted">Turn off “Hide from Google” below to list it again.</span>}
+            {model.note && <span class="gmc-muted">{model.note}</span>}
+          </Stack>
+          {model.markets.length > 0 && (
+            <Stack gap={24}>
+              {model.markets.map((group) => (
+                <Stack key={group.market} gap={8}>
+                  <strong>{group.heading}</strong>
+                  <Stack as="ul" gap={16} divided>
+                    {group.offers.map((offer, i) => (
+                      <li key={i}>
+                        <Stack gap={8}>
+                          <div class="gmc-actions">
+                            <Pill tone={offer.tone}>{offer.text}</Pill>
+                            <span>{offer.title}</span>
+                          </div>
+                          {offer.issues.length > 0 && <OfferIssues issues={offer.issues} />}
+                        </Stack>
+                      </li>
+                    ))}
+                  </Stack>
+                </Stack>
               ))}
-            </ul>
-          </div>
-        ))}
-        {model.issues.length > 0 && <Issues issues={model.issues} />}
-        {error && <Notice tone="bad">{error}</Notice>}
-        {queued && <Notice tone="ok">Queued. Google gets it within a minute.</Notice>}
-        {model.canResend && (
-          <div class="gmc-actions">
-            <Button kind="secondary" disabled={busy} onClick={resend}>
-              {busy ? 'Queuing…' : 'Resend now'}
-            </Button>
-          </div>
-        )}
+            </Stack>
+          )}
+          {model.issues.length > 0 && <Issues issues={model.issues} />}
+          {error && <Notice tone="bad">{error}</Notice>}
+          {queued && <Notice tone="ok">Queued. Google gets it within a minute.</Notice>}
+          {model.canResend && (
+            <div class="gmc-actions">
+              <Button kind="secondary" disabled={busy} onClick={resend}>
+                {busy ? 'Queuing…' : 'Resend now'}
+              </Button>
+            </div>
+          )}
+        </Stack>
       </Card>
     </Root>
   );
