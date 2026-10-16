@@ -117,3 +117,22 @@ export const deleteProductInput = (accountId: string, dataSource: string, key: I
   path: `/products/v1/${account(accountId)}/productInputs/${productInputId(key)}`,
   query: { dataSource },
 });
+
+export const PRODUCT_STATUS_FIELDS = 'name,offerId,contentLanguage,feedLabel,productStatus';
+
+/** `inputId` is the `language~label~offer` form; Google answers 404 when the offer is not there. */
+export const getProduct = (accountId: string, inputId: string): GoogleCall => ({
+  method: 'GET',
+  path: `/products/v1/${account(accountId)}/products/${inputId}`,
+  query: { fields: PRODUCT_STATUS_FIELDS },
+});
+
+export const LIST_FIELDS = 'products(name,offerId,contentLanguage,feedLabel,dataSource,productAttributes/itemGroupId),nextPageToken';
+
+export function listProducts(accountId: string, pageSize: number, pageToken?: string | null): GoogleCall {
+  return {
+    method: 'GET',
+    path: `/products/v1/${account(accountId)}/products`,
+    query: { pageSize: String(pageSize), fields: LIST_FIELDS, ...(pageToken ? { pageToken } : {}) },
+  };
+}

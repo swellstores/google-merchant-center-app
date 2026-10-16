@@ -6,10 +6,14 @@ import {
   deleteProductInput,
   getAccount,
   getHomepage,
+  getProduct,
+  LIST_FIELDS,
+  listProducts,
   insertProductInput,
   listDataSources,
   listQuotas,
   patchProductInput,
+  PRODUCT_STATUS_FIELDS,
   productInputId,
   registerGcp,
   type ProductInput,
@@ -80,6 +84,32 @@ describe('merchant calls', () => {
       method: 'DELETE',
       path: '/products/v1/accounts/123/productInputs/en~US~v1',
       query: { dataSource: ds },
+    });
+  });
+});
+
+describe('merchant reads', () => {
+  it('getProduct asks for the status fields only', () => {
+    expect(getProduct('123', 'en~US~v1')).toEqual({
+      method: 'GET',
+      path: '/products/v1/accounts/123/products/en~US~v1',
+      query: { fields: 'name,offerId,contentLanguage,feedLabel,productStatus' },
+    });
+    expect(PRODUCT_STATUS_FIELDS).toBe('name,offerId,contentLanguage,feedLabel,productStatus');
+  });
+
+  it('listProducts pages with the light field mask and the token', () => {
+    const fields = 'products(name,offerId,contentLanguage,feedLabel,dataSource,productAttributes/itemGroupId),nextPageToken';
+    expect(LIST_FIELDS).toBe(fields);
+    expect(listProducts('123', 250)).toEqual({
+      method: 'GET',
+      path: '/products/v1/accounts/123/products',
+      query: { pageSize: '250', fields },
+    });
+    expect(listProducts('123', 250, 'tok')).toEqual({
+      method: 'GET',
+      path: '/products/v1/accounts/123/products',
+      query: { pageSize: '250', fields, pageToken: 'tok' },
     });
   });
 });

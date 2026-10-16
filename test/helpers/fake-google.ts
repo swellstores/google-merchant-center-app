@@ -1,4 +1,6 @@
 import { vi } from 'vitest';
+import type { GoogleProductStatus } from '../../functions/lib/status/product-status';
+import { NOW } from './context';
 import { parseBatchRequest } from './batch-request';
 
 type Json = any;
@@ -20,6 +22,12 @@ export interface FakeGoogleOptions {
   dataSourceError?: Reply;
   /** Replaces the quota answer, e.g. a 401 */
   quotaError?: Reply;
+  /** products.get status by input id; stored inputs default to pending with a 30 day expiry */
+  statuses?: Record<string, GoogleProductStatus>;
+  /** Offers in Google that no stored input explains */
+  strays?: { dataSource: string; offerId: string; contentLanguage: string; feedLabel: string; itemGroupId?: string }[];
+  /** Per-input answer for products.get, e.g. a 500 */
+  productsGetErrors?: Record<string, Reply>;
 }
 
 /** The shape Google answers with (spike 3): one group per method, the insert group among them. */
@@ -127,6 +135,44 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}) {
       if (failure) return failure;
       inputs.set(`${query.get('dataSource')}|${body.contentLanguage}~${body.feedLabel}~${body.offerId}`, body);
       return { status: 200, body };
+    }
+    if ((m = path.match(/^\/products\/v1\/accounts\/(\d+)\/products$/)) && method === 'GET') {
+      const processed = [
+        ...[...inputs.entries()].map(([key, input]) => ({
+          dataSource: key.slice(0, key.indexOf('|')),
+          offerId: input.offerId,
+          contentLanguage: input.contentLanguage,
+          feedLabel: input.feedLabel,
+          itemGroupId: input.productAttributes?.itemGroupId,
+        })),
+        ...(options.strays ?? []),
+      ]
+        .map((p) => ({
+          name: `accounts/${m![1]}/products/${p.contentLanguage}~${p.feedLabel}~${p.offerId}`,
+          offerId: p.offerId,
+          contentLanguage: p.contentLanguage,
+          feedLabel: p.feedLabel,
+          dataSource: p.dataSource,
+          productAttributes: p.itemGroupId ? { itemGroupId: p.itemGroupId } : {},
+        }))
+        .sort((a, b) => (a.name + a.dataSource < b.name + b.dataSource ? -1 : 1));
+      const size = Number(query.get('pageSize')) || 250;
+      const start = Number(query.get('pageToken') ?? 0);
+      const page = processed.slice(start, start + size);
+      return { status: 200, body: { products: page, ...(start + size < processed.length ? { nextPageToken: String(start + size) } : {}) } };
+    }
+    if ((m = path.match(/^\/products\/v1\/accounts\/(\d+)\/products\/([^/]+)$/)) && method === 'GET') {
+      const id = decodeURIComponent(m[2]);
+      const failure = options.productsGetErrors?.[id];
+      if (failure) return failure;
+      const [contentLanguage, feedLabel, offerId] = id.split('~');
+      const stored = [...inputs.entries()].find(([key]) => key.slice(key.indexOf('|') + 1) === id);
+      if (!stored) return notFound();
+      const productStatus = options.statuses?.[id] ?? {
+        destinationStatuses: [{ reportingContext: 'SHOPPING_ADS', pendingCountries: [feedLabel] }],
+        googleExpirationDate: new Date(NOW + 30 * 86_400_000).toISOString(),
+      };
+      return { status: 200, body: { name: `accounts/${m[1]}/products/${id}`, offerId, contentLanguage, feedLabel, productStatus } };
     }
     if ((m = path.match(/^\/products\/v1\/accounts\/\d+\/productInputs\/([^/]+)$/))) {
       const id = decodeURIComponent(m[1]);
