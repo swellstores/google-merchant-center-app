@@ -37,6 +37,8 @@ export interface StatusRefreshJob {
   counters: StatusCounters;
   issues: IssueTally[];
   date_started: string;
+  /** When the first pass came: the refresh's length counts from here, not from its wait behind other work */
+  date_first_pass?: string | null;
   date_finished?: string | null;
   duration_ms?: number | null;
 }
@@ -69,6 +71,7 @@ export function newStatusRefreshJob(now: number): StatusRefreshJob {
     counters: { approved: 0, partial: 0, pending: 0, disapproved: 0, not_sent: 0, excluded: 0 },
     issues: [],
     date_started: iso(now),
+    date_first_pass: null,
     date_finished: null,
     duration_ms: null,
   };
@@ -155,6 +158,7 @@ export async function statusRefreshPass(
   page?: unknown,
 ): Promise<PassResult<StatusRefreshJob>> {
   if (reads.length >= SWELL_WAVE) throw new Error('A pass needs room for its writes in one round trip');
+  const started = env.ctx.now();
   // Reading the page sends the waiting writes; a page in hand leaves them to share the round trip.
   if (SWELL_WAVE - reads.length - (page === undefined ? 0 : env.outbox.size) <= 0) return { job, sentOps: 0, progressed: false, answers: [] };
   const answer = page === undefined ? (await env.outbox.send([statusPageRead(job)]))[0] : page;
@@ -192,6 +196,7 @@ export async function statusRefreshPass(
 
   const now = env.ctx.now();
   const next = structuredClone(job);
+  next.date_first_pass ??= iso(started);
   const writes: BatchOp[] = [];
   // The round trip stays in one server wave with the writes that wait and the caller's reads.
   const cap = Math.min(STATUS_WRITES, SWELL_WAVE - reads.length - env.outbox.size);
@@ -223,7 +228,7 @@ export async function statusRefreshPass(
   if (products.length < STATUS_PAGE && counted === products.length) {
     next.status = 'done';
     next.date_finished = iso(now);
-    next.duration_ms = now - Date.parse(job.date_started);
+    next.duration_ms = now - Date.parse(next.date_first_pass);
   }
   env.outbox.add(...writes);
   const answers = await env.outbox.send(reads);

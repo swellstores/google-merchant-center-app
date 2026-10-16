@@ -49,8 +49,9 @@
         },
         "issues": { "type": "array", "value_type": "object", "description": "Issue tallies by code: severity, description, documentation, products and sample products" },
         "date_started": { "type": "date" },
+        "date_first_pass": { "type": "date", "description": "When the first pass came: the refresh's length counts from here" },
         "date_finished": { "type": "date" },
-        "duration_ms": { "type": "int" }
+        "duration_ms": { "type": "int", "description": "From the first pass to the end: the next refresh waits max(1 h, 3 × this)" }
       }
     },
     "orphan_scan": {

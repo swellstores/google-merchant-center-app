@@ -198,16 +198,26 @@ describe('status refresh pass', () => {
   it('finishes on a short page with counters and duration', async () => {
     const products = [product(1), product(2), product(3)];
     const { env } = setup(products, { statuses: { [offerOf(1)]: approved(), [offerOf(2)]: disapproved('image_too_small') } });
-    const pass = await statusRefreshPass(env, newStatusRefreshJob(NOW - 300_000));
+    const pass = await statusRefreshPass(env, { ...newStatusRefreshJob(NOW - HOUR), date_first_pass: iso(NOW - 300_000) });
     expect(pass.progressed).toBe(true);
     expect(pass.job).toMatchObject({
       status: 'done',
       cursor: idOf(3),
       checked: 3,
       counters: { approved: 1, disapproved: 1, pending: 1 },
+      date_first_pass: iso(NOW - 300_000),
       date_finished: iso(NOW),
       duration_ms: 300_000,
     });
+  });
+
+  it('measures a refresh from its first pass, not from the wait behind other work', async () => {
+    const products = Array.from({ length: STATUS_PAGE + 1 }, (_, i) => product(i + 1));
+    const first = await statusRefreshPass(setup(products).env, newStatusRefreshJob(NOW - 8 * HOUR));
+    expect(first.job).toMatchObject({ status: 'running', date_first_pass: iso(NOW), duration_ms: null });
+    const later = setup(products, {}, fixedClock(NOW + 60_000));
+    const last = await statusRefreshPass(later.env, first.job);
+    expect(last.job).toMatchObject({ status: 'done', date_first_pass: iso(NOW), date_finished: iso(NOW + 60_000), duration_ms: 60_000 });
   });
 
   it('a full page leaves the job running and the empty page after it finishes', async () => {
