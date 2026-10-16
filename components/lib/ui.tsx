@@ -84,6 +84,7 @@ const CSS = `
 .gmc-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; }
 .gmc-modal { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 20px; width: min(480px, 90vw); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); display: flex; flex-direction: column; gap: 12px; }
 .gmc-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.gmc-actions > .gmc-pill { align-self: center; }
 .gmc-actions.end { justify-content: flex-end; }
 `;
 
