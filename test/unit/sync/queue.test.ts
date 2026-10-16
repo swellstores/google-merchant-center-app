@@ -42,11 +42,15 @@ describe('enqueue', () => {
     expect(collections['/queue-items'][0].revision).toBe(1);
   });
 
-  it('keeps the input ids of a delete', async () => {
+  it('gives a delete its own item, which later changes leave alone', async () => {
     const { swell, collections } = createFakeSwell();
     await enqueue(swell, { productId: 'p1', kind: 'full' });
     await enqueue(swell, { productId: 'p1', kind: 'delete', inputIds: ['en~US~p1'] });
-    expect(collections['/queue-items'][0]).toMatchObject({ kind: 'delete', input_ids: ['en~US~p1'] });
+    await enqueue(swell, { productId: 'p1', kind: 'light' });
+    expect(collections['/queue-items'].map((i) => [i.kind, i.input_ids, i.revision])).toEqual([
+      ['full', [], 1],
+      ['delete', ['en~US~p1'], 0],
+    ]);
   });
 });
 
@@ -155,14 +159,37 @@ describe('settleQueue', () => {
     expect(collections['/queue-items'][0]).toMatchObject({ product_id: 'p1', revision: 1 });
   });
 
-  it('merges a kept unit with an edit made meanwhile', async () => {
+  it('leaves a delete made meanwhile as its own item when it settles a kept unit', async () => {
     const { swell, collections } = createFakeSwell();
     await enqueue(swell, { productId: 'p1', kind: 'light' });
     const units = unitsFromQueue(await takeQueue(swell, 10));
     await enqueue(swell, { productId: 'p1', kind: 'delete', inputIds: ['en~US~p1'] });
     await settleQueue(testContext(swell), [], [{ ...units[0], error: 'backend error', charge: true }]);
-    expect(collections['/queue-items']).toHaveLength(1);
-    expect(collections['/queue-items'][0]).toMatchObject({ kind: 'delete', input_ids: ['en~US~p1'], attempts: 1 });
+    expect(collections['/queue-items'].map((i) => [i.kind, i.input_ids, i.attempts])).toEqual([
+      ['light', [], 1],
+      ['delete', ['en~US~p1'], 0],
+    ]);
+    const [merged] = unitsFromQueue(await takeQueue(swell, 10));
+    expect(merged).toMatchObject({ kind: 'delete', inputIds: ['en~US~p1'], queueItemIds: collections['/queue-items'].map((i) => i.id) });
+  });
+
+  it('keeps a kept delete unit’s delete item and removes the items it covers', async () => {
+    const { swell, collections } = createFakeSwell();
+    await enqueue(swell, { productId: 'p1', kind: 'light', inputIds: ['en~US~old'] });
+    await enqueue(swell, { productId: 'p1', kind: 'delete', inputIds: ['en~US~p1'] });
+    const [unit] = unitsFromQueue(await takeQueue(swell, 10));
+    expect(unit.kind).toBe('delete');
+    await settleQueue(testContext(swell), [], [{ ...unit, error: 'rate limited' }]);
+    expect(collections['/queue-items']).toEqual([expect.objectContaining({ kind: 'delete', product_id: 'p1' })]);
+    expect(collections['/queue-items'][0].input_ids).toEqual(['en~US~p1', 'en~US~old']);
+  });
+
+  it('counts every item’s sent offers as known when it merges a product’s items', () => {
+    const items = [
+      { id: 'a', product_id: 'p1', kind: 'full' as const, input_ids: [], done_input_ids: ['en~US~v3'] },
+      { id: 'b', product_id: 'p1', kind: 'delete' as const, input_ids: ['en~US~v1'] },
+    ];
+    expect(unitsFromQueue(items)[0]).toMatchObject({ kind: 'delete', inputIds: ['en~US~v3', 'en~US~v1'], doneInputIds: [] });
   });
 
   it('settles in one batch: removals, kept items and give-ups', async () => {
@@ -194,7 +221,8 @@ describe('settleQueue', () => {
     collections['/queue-items'].push({ id: 'a', product_id: 'p1', kind: 'full', input_ids: ['en~US~p1', 'en~US~p1'], done_input_ids: ['x', 'x'], attempts: 0, revision: 0 });
     const [unit] = unitsFromQueue(await takeQueue(swell, 10));
     await settleQueue(testContext(swell), [], [{ ...unit, error: 'rate limited' }]);
-    expect(collections['/queue-items'][0]).toMatchObject({ input_ids: ['en~US~p1'], done_input_ids: ['x'] });
+    // Sent offers count as known (unitsFromQueue), so 'x' joins the list once.
+    expect(collections['/queue-items'][0]).toMatchObject({ input_ids: ['en~US~p1', 'x'], done_input_ids: ['x'] });
   });
 
   it('recreates a kept item removed meanwhile with its product, keeping a pending delete', async () => {

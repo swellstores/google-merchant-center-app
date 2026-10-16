@@ -1,6 +1,6 @@
 import type { AppContext, SwellClient } from '../../functions/lib/context';
 import { alarmRead, alarmWrite, type Alarm } from '../../functions/lib/sync/alarm';
-import { enqueueWrite, productItemsRead, takeRead, type QueueItem, type QueuePlan } from '../../functions/lib/sync/queue';
+import { enqueueWrite, mergeTarget, productItemsRead, takeRead, type QueueItem, type QueuePlan } from '../../functions/lib/sync/queue';
 import { stateRead, type SyncState } from '../../functions/lib/sync/state';
 
 /** The store's records the way tests set them up and look at them, outside any batch. */
@@ -40,7 +40,7 @@ export async function queueCount(swell: SwellClient): Promise<number> {
 export async function enqueue(swell: SwellClient, plan: QueuePlan): Promise<void> {
   const read = productItemsRead([plan.productId]);
   const existing = await swell.get(read.url, read.data);
-  const op = enqueueWrite(existing?.results?.[0], plan);
+  const op = enqueueWrite(mergeTarget(existing?.results ?? [], plan), plan);
   if (op.method === 'post') await swell.post(op.url, op.data!);
   else await swell.put(op.url, op.data!);
 }

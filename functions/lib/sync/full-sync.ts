@@ -3,7 +3,7 @@ import type { SwellProduct } from '../mapping/types';
 import { countOf, listOf, type BatchOp } from '../swell-batch';
 import { iso } from '../time';
 import { deliver, PASS_PRODUCTS, type DeliveryEnv } from './deliver';
-import { enqueueWrite, productItemsRead, type QueueItem, type WorkUnit } from './queue';
+import { enqueueWrite, mergeTarget, productItemsRead, type QueueItem, type WorkUnit } from './queue';
 import type { FullSyncJob } from './state';
 
 export const JOB_PAGE = PASS_PRODUCTS;
@@ -75,12 +75,10 @@ export async function fullSyncPass(env: DeliveryEnv, job: FullSyncJob, reads: Ba
   if (leftovers.length) {
     const items = listOf<QueueItem>(answers[0], 'the queue');
     env.outbox.add(
-      ...leftovers.map((unit) =>
-        enqueueWrite(
-          items.find((item) => item.product_id === unit.productId),
-          { productId: unit.productId, kind: 'full', inputIds: unit.progress ?? [] },
-        ),
-      ),
+      ...leftovers.map((unit) => {
+        const plan = { productId: unit.productId, kind: 'full' as const, inputIds: unit.progress ?? [] };
+        return enqueueWrite(mergeTarget(items, plan), plan);
+      }),
     );
   }
 

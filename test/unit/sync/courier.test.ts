@@ -4,7 +4,7 @@ import { loadMarkets } from '../../../functions/lib/connection/markets';
 import { COURIER_BUDGET_MS, NEXT_RUN_MS, pacedDelay, PASS_PRODUCTS, runCourier } from '../../../functions/lib/sync/courier';
 import { MAX_ATTEMPTS, queueChange } from '../../../functions/lib/sync/queue';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
-import { APP_ID, NOW, slowServices, testContext } from '../../helpers/context';
+import { APP_ID, fixedClock, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
 import { makeServiceAccountKey } from '../../helpers/keys';
@@ -222,6 +222,55 @@ describe('runCourier', () => {
     expect(collections['/queue-items']).toEqual([expect.objectContaining({ product_id: 'p1', kind: 'full' })]);
     await runCourier(ctx);
     expect(google.inputs.get(`${DS}|en~US~p1`)?.productAttributes.title).toBe('Mug');
+  });
+
+  it('deletes every offer of a product deleted with its variants in one burst', async () => {
+    const tee = {
+      ...MUG,
+      variants: { results: [{ id: 'v1', name: 'S', active: true }, { id: 'v2', name: 'M', active: true }] },
+      $app: { [APP_ID]: { input_ids: ['en~US~v1', 'en~US~v2'] } },
+    };
+    const { ctx, swell, collections, google } = await steady([tee]);
+    google.inputs.set(`${DS}|en~US~v1`, {});
+    google.inputs.set(`${DS}|en~US~v2`, {});
+    await enqueue(swell, { productId: 'p1', kind: 'light' });
+    collections['/products'].length = 0;
+    // product.deleted and both product.variant.deleted arrive within ~150 ms: every
+    // read is made before any write, and the delete is written first.
+    await Promise.all([
+      queueChange(ctx, { productId: 'p1', kind: 'delete', inputIds: ['en~US~v1', 'en~US~v2'] }),
+      queueChange(ctx, { productId: 'p1', kind: 'full' }),
+      queueChange(ctx, { productId: 'p1', kind: 'full' }),
+    ]);
+    await runCourier(ctx);
+    expect([...google.inputs.keys()]).toEqual([]);
+    expect(collections['/queue-items']).toEqual([]);
+  });
+
+  it('deletes a product the merchant deleted while Google rate-limited it', async () => {
+    const sent = { ...MUG, $app: { [APP_ID]: { input_ids: ['en~US~p1'] } } };
+    const options: FakeGoogleOptions = { offerErrors: { p1: { status: 429, body: { error: { message: 'quota/request_rate_too_high' } } } } };
+    const { ctx, swell, collections, google } = await steady([sent], options);
+    google.inputs.set(`${DS}|en~US~p1`, {});
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    // The merchant deletes the product after the run re-read its items and before it settles them.
+    const post = swell.post.getMockImplementation()!;
+    let deleted = false;
+    swell.post.mockImplementation(async (url: string, data: any) => {
+      const answer = await post(url, data);
+      if (url === '/:batch' && !deleted && data.some((op: any) => op.method === 'get' && op.url === '/queue-items' && op.data?.where?.id)) {
+        deleted = true;
+        collections['/products'].length = 0;
+        await queueChange(ctx, { productId: 'p1', kind: 'delete', inputIds: ['en~US~p1'] });
+      }
+      return answer;
+    });
+    expect((await runCourier(ctx)).next).toBe('later');
+    swell.post.mockImplementation(post);
+    delete options.offerErrors!.p1;
+    await runCourier(testContext(swell, google.fetch, fixedClock(NOW + 60_000)));
+    expect(google.inputs.has(`${DS}|en~US~p1`)).toBe(false);
+    expect(collections['/queue-items']).toEqual([]);
   });
 
   it('backs off after a rate limit and keeps the queue', async () => {

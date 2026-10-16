@@ -53,9 +53,20 @@ export interface QueuePlan {
   inputIds?: string[];
 }
 
-/** The write that queues a change, merged into the product's item when it has one. */
+/**
+ * The item a change merges into: the product's oldest item that is not a
+ * delete. A delete never merges: it keeps its own item, which no other
+ * writer's PUT can then turn into a lighter kind or rob of its offer ids
+ * (they come from the deleted record and exist nowhere else).
+ */
+export function mergeTarget(items: QueueItem[], plan: QueuePlan): QueueItem | undefined {
+  if (plan.kind === 'delete') return undefined;
+  return items.find((item) => item.product_id === plan.productId && item.kind !== 'delete');
+}
+
+/** The write that queues a change: an update of `current`, or a new item. */
 export function enqueueWrite(current: QueueItem | undefined, plan: QueuePlan): BatchOp {
-  if (!current) {
+  if (!current || plan.kind === 'delete') {
     return { method: 'post', url: COLLECTION, data: { product_id: plan.productId, kind: plan.kind, input_ids: plan.inputIds ?? [], attempts: 0, revision: 0 } };
   }
   return {
@@ -85,7 +96,7 @@ export async function queueChange(ctx: AppContext, plan: QueuePlan): Promise<voi
   const answers = await swellBatch(ctx.swell, [connectionRead, productItemsRead([plan.productId]), alarmRead]);
   const connection = listOf<Connection>(answers[0], 'the connection')[0];
   if (connection?.status !== 'connected') return;
-  const current = listOf<QueueItem>(answers[1], 'the queue')[0];
+  const current = mergeTarget(listOf<QueueItem>(answers[1], 'the queue'), plan);
   const wake = armWrite(listOf<Alarm>(answers[2], 'the alarm')[0] ?? null, ctx.now(), ENQUEUE_DELAY_MS);
   const writes = [enqueueWrite(current, plan), ...(wake ? [wake] : [])];
   const results = await swellBatch(ctx.swell, writes);
@@ -109,6 +120,10 @@ export const productItemsRead = (productIds: string[]): BatchOp => ({
 
 export const itemRemoval = (id: string): BatchOp => ({ method: 'delete', url: `${COLLECTION}/${id}` });
 
+/**
+ * One unit per product. Several items merge: a delete wins, and every offer
+ * any item lists or has sent stays known, so a delete reaches them all.
+ */
 export function unitsFromQueue(items: QueueItem[]): WorkUnit[] {
   const byProduct = new Map<string, WorkUnit>();
   for (const item of items) {
@@ -117,7 +132,7 @@ export function unitsFromQueue(items: QueueItem[]): WorkUnit[] {
       byProduct.set(item.product_id, {
         productId: item.product_id,
         kind: item.kind,
-        inputIds: [...(item.input_ids ?? [])],
+        inputIds: [...new Set([...(item.input_ids ?? []), ...(item.done_input_ids ?? [])])],
         queueItemIds: [item.id],
         attempts: item.attempts ?? 0,
         revisions: { [item.id]: item.revision ?? 0 },
@@ -126,7 +141,7 @@ export function unitsFromQueue(items: QueueItem[]): WorkUnit[] {
       continue;
     }
     unit.kind = mergeKind(unit.kind, item.kind);
-    unit.inputIds = [...new Set([...unit.inputIds, ...(item.input_ids ?? [])])];
+    unit.inputIds = [...new Set([...unit.inputIds, ...(item.input_ids ?? []), ...(item.done_input_ids ?? [])])];
     unit.queueItemIds.push(item.id);
     unit.attempts = Math.max(unit.attempts, item.attempts ?? 0);
     unit.revisions![item.id] = item.revision ?? 0;
@@ -165,7 +180,9 @@ export function settleWrites(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]
       });
       continue;
     }
-    const [keep, ...duplicates] = ids;
+    // A delete's own item survives, as it was written; the items it covers go.
+    const keep = ids.find((id) => current.get(id)!.kind === 'delete') ?? ids[0];
+    const duplicates = ids.filter((id) => id !== keep);
     removed.push(...duplicates.filter((id) => unchanged(unit, id)));
     const item = current.get(keep)!;
     writes.push({
