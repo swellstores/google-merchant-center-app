@@ -7,7 +7,15 @@ import type { DeliveryEnv } from '../sync/deliver';
 import type { PassResult } from '../sync/full-sync';
 import { enqueueWrite } from '../sync/queue';
 import { iso } from '../time';
-import { earliestExpiry, productStatus, statusFields, type GoogleProductStatus, type OfferAnswer, type StatusIssue } from './product-status';
+import {
+  earliestExpiry,
+  productStatus,
+  SEVERITY_ORDER,
+  statusFields,
+  type GoogleProductStatus,
+  type OfferAnswer,
+  type StatusIssue,
+} from './product-status';
 
 export interface StatusCounters {
   approved: number;
@@ -60,8 +68,6 @@ export const MAX_TALLIES = 30;
 export const TOP_ISSUES = 5;
 export const MAX_SAMPLES = 3;
 
-const SEVERITY_RANK: Record<StatusIssue['severity'], number> = { disapproved: 0, demoted: 1, info: 2 };
-
 export function newStatusRefreshJob(now: number): StatusRefreshJob {
   return {
     status: 'running',
@@ -90,7 +96,7 @@ export const statusPageRead = (job: StatusRefreshJob): BatchOp => ({
 /** The worst issues first, then the most common. */
 export function summaryOf(job: StatusRefreshJob): StatusSummary {
   const top_issues = [...job.issues]
-    .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.products - a.products)
+    .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || b.products - a.products)
     .slice(0, TOP_ISSUES);
   return { counters: job.counters, top_issues, date_refreshed: job.date_finished ?? job.date_started };
 }
@@ -133,7 +139,7 @@ function tally(tallies: IssueTally[], product: SwellProduct, issues: StatusIssue
       if (issue.documentation) entry.documentation = issue.documentation;
       tallies.push(entry);
     }
-    if (SEVERITY_RANK[issue.severity] < SEVERITY_RANK[entry.severity]) entry.severity = issue.severity;
+    if (SEVERITY_ORDER[issue.severity] < SEVERITY_ORDER[entry.severity]) entry.severity = issue.severity;
     entry.products++;
     if (entry.samples.length < MAX_SAMPLES) entry.samples.push({ id: product.id, name: product.name ?? product.id });
   }

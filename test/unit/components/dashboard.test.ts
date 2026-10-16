@@ -87,7 +87,7 @@ describe('dashboardModel', () => {
     expect(dashboardModel(view({ queue: 7 }), NOW).progress).toEqual([]);
   });
 
-  const issue = (severity: 'disapproved' | 'demoted' | 'info', products = 3, names: string[] = ['A']) => ({
+  const issue = (severity: 'disapproved' | 'demoted' | 'review' | 'info', products = 3, names: string[] = ['A']) => ({
     code: severity,
     severity,
     description: 'Bad',
@@ -98,10 +98,11 @@ describe('dashboardModel', () => {
     dashboardModel(view({ summary: { ...summary('2026-10-16T11:59:30Z'), top_issues: issues } }), NOW).issues;
 
   it('issues carry their severity label and tone', () => {
-    expect(issuesOf(issue('disapproved'), issue('demoted'), issue('info')).map((i) => i.severity)).toEqual([
+    expect(issuesOf(issue('disapproved'), issue('demoted'), issue('review'), issue('info')).map((i) => i.severity)).toEqual([
       { tone: 'bad', label: 'Disapproved' },
       { tone: 'info', label: 'Limited' },
       { tone: 'neutral', label: 'In review' },
+      { tone: 'neutral', label: 'Info' },
     ]);
   });
 

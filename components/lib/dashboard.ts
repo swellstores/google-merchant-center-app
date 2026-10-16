@@ -13,7 +13,7 @@ export interface StatusCounters {
 
 export interface IssueTally {
   code: string;
-  severity: 'disapproved' | 'demoted' | 'info';
+  severity: 'disapproved' | 'demoted' | 'review' | 'info';
   description: string;
   documentation?: string;
   products: number;
@@ -56,7 +56,8 @@ const STATS: { key: keyof StatusCounters; label: string; tone: Tone }[] = [
 export const SEVERITIES: Record<IssueTally['severity'], { tone: Tone; label: string }> = {
   disapproved: { tone: 'bad', label: 'Disapproved' },
   demoted: { tone: 'info', label: 'Limited' },
-  info: { tone: 'neutral', label: 'In review' },
+  review: { tone: 'neutral', label: 'In review' },
+  info: { tone: 'neutral', label: 'Info' },
 };
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;

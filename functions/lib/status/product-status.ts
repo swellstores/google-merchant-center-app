@@ -28,7 +28,8 @@ export interface OfferAnswer {
 
 export interface StatusIssue {
   code: string;
-  severity: 'disapproved' | 'demoted' | 'info';
+  /** `review`: Google is still processing it */
+  severity: 'disapproved' | 'demoted' | 'review' | 'info';
   description: string;
   detail?: string;
   documentation?: string;
@@ -57,7 +58,8 @@ const LABELS: Record<OfferStatus, string> = {
   disapproved: 'Disapproved',
 };
 const BADNESS: Record<OfferStatus, number> = { approved: 0, pending: 1, partial: 2, disapproved: 3 };
-const SEVERITY_ORDER: Record<StatusIssue['severity'], number> = { disapproved: 0, demoted: 1, info: 2 };
+/** The worst first */
+export const SEVERITY_ORDER: Record<StatusIssue['severity'], number> = { disapproved: 0, demoted: 1, review: 2, info: 3 };
 
 const SKIP_LABELS: Record<Exclude<SkipReason, 'excluded'>, string> = {
   inactive: 'Not sent: inactive',
@@ -79,7 +81,7 @@ export function offerStatus(answer: OfferAnswer): OfferStatus {
 }
 
 function severityOf(google: string | undefined, resolution: string | undefined): StatusIssue['severity'] {
-  if (resolution?.toLowerCase() === 'pending_processing') return 'info';
+  if (resolution?.toLowerCase() === 'pending_processing') return 'review';
   if (google === 'DISAPPROVED') return 'disapproved';
   if (google === 'DEMOTED') return 'demoted';
   return 'info';

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { callRoute } from '../../../components/lib/api';
-import { statusPanelModel, type OfferView, type ProductStatusView, type StatusIssue } from '../../../components/lib/status-view';
+import { issueSeverity, statusPanelModel, type OfferView, type ProductStatusView, type StatusIssue } from '../../../components/lib/status-view';
 
 const NOW = Date.parse('2026-10-16T12:00:00Z');
 
@@ -82,10 +82,10 @@ describe('statusPanelModel', () => {
   });
 
   it('issues inside an offer carry their border tone, not a pill', () => {
-    const issues: StatusIssue[] = [ISSUE, { ...ISSUE, code: 'b', severity: 'demoted' }, { ...ISSUE, code: 'c', severity: 'info' }];
+    const issues: StatusIssue[] = [ISSUE, { ...ISSUE, code: 'b', severity: 'demoted' }, { ...ISSUE, code: 'c', severity: 'review' }, { ...ISSUE, code: 'd', severity: 'info' }];
     const model = statusPanelModel(view({ live: { checked_at: '2026-10-16T12:00:00Z', more: 0, offers: [offer({ status: 'pending', issues })] } }), NOW);
     expect(model.markets[0].offers[0]).toMatchObject({ tone: 'neutral', text: 'Pending' });
-    expect(model.markets[0].offers[0].issues.map((i) => i.tone)).toEqual(['bad', 'info', 'neutral']);
+    expect(model.markets[0].offers[0].issues.map((i) => i.tone)).toEqual(['bad', 'info', 'neutral', 'neutral']);
   });
 
   it('an invalid date does not throw', () => {
@@ -99,6 +99,13 @@ describe('statusPanelModel', () => {
     const model = statusPanelModel(view({ stored: {} }), NOW);
     expect(model.headline).toEqual({ tone: 'neutral', text: 'Not sent' });
     expect(model.note).toBeNull();
+  });
+});
+
+describe('issueSeverity', () => {
+  it('an issue in review and an info issue read differently', () => {
+    expect(issueSeverity('review')).toEqual({ tone: 'neutral', label: 'In review' });
+    expect(issueSeverity('info')).toEqual({ tone: 'neutral', label: 'Info' });
   });
 });
 

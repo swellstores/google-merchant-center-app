@@ -392,13 +392,14 @@ describe('summaryOf', () => {
         tally('image_too_small', 'disapproved', 7),
         tally('missing_gtin', 'demoted', 12),
         tally('shipping', 'info', 1),
+        tally('pending_initial_review', 'review', 3),
       ],
       date_finished: iso(NOW),
       duration_ms: HOUR,
     };
     expect(summaryOf(job)).toEqual({
       counters: job.counters,
-      top_issues: [job.issues[3], job.issues[2], job.issues[4], job.issues[1], job.issues[0]],
+      top_issues: [job.issues[3], job.issues[2], job.issues[4], job.issues[1], job.issues[6]],
       date_refreshed: iso(NOW),
     });
   });

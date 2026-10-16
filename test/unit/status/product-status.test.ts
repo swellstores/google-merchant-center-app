@@ -88,13 +88,17 @@ describe('productStatus', () => {
     expect(result.issues[0].severity).toBe('info');
   });
 
-  it('an issue Google is still processing is info, not disapproved', () => {
+  it('an issue Google is still processing is in review, not disapproved', () => {
     const processing = { code: 'pending_initial_policy_review_disapproved', severity: 'DISAPPROVED', resolution: 'Pending_Processing', description: 'Pending initial review' };
     const rejected = { code: 'bad', severity: 'DISAPPROVED', resolution: 'merchant_action', description: 'Bad' };
-    const { issues } = productStatus([disapproved('a', [processing, rejected])]);
+    const hint = { code: 'hint', severity: 'NOT_IMPACTED', description: 'Hint' };
+    const limited = { code: 'limited', severity: 'DEMOTED', description: 'Limited' };
+    const { issues } = productStatus([disapproved('a', [hint, processing, limited, rejected])]);
     expect(issues.map((i) => [i.code, i.severity])).toEqual([
       ['bad', 'disapproved'],
-      ['pending_initial_policy_review_disapproved', 'info'],
+      ['limited', 'demoted'],
+      ['pending_initial_policy_review_disapproved', 'review'],
+      ['hint', 'info'],
     ]);
   });
 

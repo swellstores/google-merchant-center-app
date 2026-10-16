@@ -7,7 +7,7 @@ export type StatusValue = 'approved' | 'partial' | 'pending' | 'disapproved' | '
 /** Mirrors `StatusIssue` in functions/lib/status/product-status.ts. */
 export interface StatusIssue {
   code: string;
-  severity: 'disapproved' | 'demoted' | 'info';
+  severity: 'disapproved' | 'demoted' | 'review' | 'info';
   description: string;
   detail?: string;
   documentation?: string;
@@ -74,7 +74,7 @@ const day = (iso: string | null | undefined) => {
 
 const COUNTRY_NAMES = new Map(COUNTRIES);
 
-const ISSUE_TONES: Record<StatusIssue['severity'], Tone> = { disapproved: 'bad', demoted: 'info', info: 'neutral' };
+const ISSUE_TONES: Record<StatusIssue['severity'], Tone> = { disapproved: 'bad', demoted: 'info', review: 'neutral', info: 'neutral' };
 
 export function marketHeading(market: string): string {
   const [country, language] = market.split(' ');
