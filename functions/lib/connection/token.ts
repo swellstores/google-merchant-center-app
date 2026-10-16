@@ -25,7 +25,3 @@ export async function accessTokenFor(ctx: AppContext, connection: Connection, sa
 
 /** Google refused the key or the account: syncing stops until the merchant fixes it. */
 export const brokenPatch = (message: string): Partial<Connection> => ({ status: 'broken', last_error: message, access_token: null, access_token_expires: null });
-
-export async function markBroken(ctx: AppContext, connection: Connection, message: string): Promise<void> {
-  await saveConnection(ctx.swell, connection.id, brokenPatch(message));
-}

@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { accessTokenFor, markBroken } from '../../../functions/lib/connection/token';
+import { accessTokenFor, brokenPatch } from '../../../functions/lib/connection/token';
 import { loadConnection } from '../../../functions/lib/connection/store';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
 import { NOW, testContext } from '../../helpers/context';
@@ -57,15 +57,7 @@ describe('accessTokenFor', () => {
     expect(swell.put).not.toHaveBeenCalled();
   });
 
-  it('marks a connection broken without wiping the key', async () => {
-    const { swell } = createFakeSwell({ connection: connected({ access_token: 'old' }) });
-    const ctx = testContext(swell);
-    await markBroken(ctx, (await loadConnection(swell))!, 'Invalid JWT Signature.');
-    expect(await loadConnection(swell)).toMatchObject({
-      status: 'broken',
-      last_error: 'Invalid JWT Signature.',
-      access_token: null,
-      private_key: key.private_key,
-    });
+  it('marks a connection broken without wiping the key', () => {
+    expect(brokenPatch('Invalid JWT Signature.')).toEqual({ status: 'broken', last_error: 'Invalid JWT Signature.', access_token: null, access_token_expires: null });
   });
 });

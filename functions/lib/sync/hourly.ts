@@ -1,12 +1,13 @@
-import { loadConnection, type Connection } from '../connection/store';
-import { accessTokenFor, markBroken } from '../connection/token';
+import { connectionRead, connectionWrite, type Connection } from '../connection/store';
+import { accessTokenFor, brokenPatch } from '../connection/token';
 import type { AppContext } from '../context';
 import { GoogleApiError, googleCall } from '../google/http';
 import { listQuotas } from '../google/merchant';
+import { listOf, recordOf, swellBatch, type BatchOp } from '../swell-batch';
 import { iso } from '../time';
-import { loadAlarm, setAlarm } from './alarm';
-import { queueCount } from './queue';
-import { loadState, saveState, type QuotaInfo, type SyncState } from './state';
+import { alarmRead, alarmWrite, type Alarm } from './alarm';
+import { takeRead } from './queue';
+import { stateRead, stateWrite, type QuotaInfo, type SyncState } from './state';
 
 /** An alarm this far in the past means its run never happened. */
 export const STALL_MS = 5 * 60_000;
@@ -47,43 +48,45 @@ export async function readQuota(ctx: AppContext, token: string, accountId: strin
   }
 }
 
-/**
- * Reads Google's limits for product inserts into the state, also the one in
- * hand. Resolves with Google's refusal of the key or account, after marking
- * the connection broken; other Google errors keep the old limits.
- */
-export async function refreshQuota(ctx: AppContext, connection: Connection, state: SyncState): Promise<GoogleApiError | null> {
-  try {
-    const token = await accessTokenFor(ctx, connection);
-    const quota = await readQuota(ctx, token, connection.merchant_id!, state.quota);
-    if (quota) {
-      await saveState(ctx.swell, state.id, { quota: { $set: quota } });
-      state.quota = quota;
-    }
-  } catch (error) {
-    if (!(error instanceof GoogleApiError)) throw error;
-    if (error.kind === 'auth') {
-      await markBroken(ctx, connection, error.message);
-      return error;
-    }
-  }
-  return null;
+/** Writes them all in one round trip; a refused entry fails the run. */
+async function writeAll(ctx: AppContext, writes: BatchOp[]): Promise<void> {
+  const results = await swellBatch(ctx.swell, writes);
+  results.forEach((result, i) => recordOf(result, `the write to ${writes[i].url}`));
 }
 
-/** Safety net: refreshes the quota daily and wakes a courier whose alarm was lost. */
+/**
+ * Safety net: refreshes the quota daily and wakes a courier whose alarm was
+ * lost. One read, Google when the quota is due, one write.
+ */
 export async function runHourly(ctx: AppContext): Promise<void> {
-  const connection = await loadConnection(ctx.swell);
+  const answers = await swellBatch(ctx.swell, [connectionRead, stateRead, takeRead(1), alarmRead]);
+  const connection = listOf<Connection>(answers[0], 'the connection')[0];
   if (connection?.status !== 'connected' || !connection.merchant_id) return;
-  const state = await loadState(ctx.swell);
+  const state = listOf<SyncState>(answers[1], 'the sync state')[0];
+  const queued = listOf(answers[2], 'the queue').length > 0;
+  const alarm = listOf<Alarm>(answers[3], 'the alarm')[0] ?? null;
   const now = ctx.now();
+  const writes: BatchOp[] = [];
 
-  const checked = state.quota?.date_checked ? Date.parse(state.quota.date_checked) : 0;
-  if (now - checked >= QUOTA_TTL_MS && (await refreshQuota(ctx, connection, state))) return;
+  const checked = state?.quota?.date_checked ? Date.parse(state.quota.date_checked) : 0;
+  if (now - checked >= QUOTA_TTL_MS) {
+    try {
+      const token = await accessTokenFor(ctx, connection, (patch) => writes.push(connectionWrite(connection.id, patch)));
+      const quota = await readQuota(ctx, token, connection.merchant_id, state?.quota);
+      if (quota) writes.push(stateWrite(state?.id, { quota: { $set: quota } }));
+    } catch (error) {
+      if (!(error instanceof GoogleApiError)) throw error;
+      // Google refused the key or the account: the courier stops, nothing to wake.
+      if (error.kind === 'auth') return writeAll(ctx, [connectionWrite(connection.id, brokenPatch(error.message))]);
+    }
+  }
 
-  const pending = state.full_sync?.status === 'running' || (await queueCount(ctx.swell)) > 0;
-  if (!pending) return;
-  const alarm = await loadAlarm(ctx.swell);
-  const wakeAt = alarm.wake_at ? Date.parse(alarm.wake_at) : null;
-  const notBefore = state.not_before ? Date.parse(state.not_before) : 0;
-  if ((wakeAt === null || wakeAt < now - STALL_MS) && !(notBefore > now)) await setAlarm(ctx, now);
+  const pending = state?.full_sync?.status === 'running' || queued;
+  const wakeAt = alarm?.wake_at ? Date.parse(alarm.wake_at) : null;
+  const notBefore = state?.not_before ? Date.parse(state.not_before) : 0;
+  if (pending && (wakeAt === null || wakeAt < now - STALL_MS) && !(notBefore > now)) {
+    const wake = alarmWrite(alarm, now);
+    if (wake) writes.push(wake);
+  }
+  await writeAll(ctx, writes);
 }
