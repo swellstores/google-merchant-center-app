@@ -332,6 +332,29 @@ describe('status refresh pass', () => {
     expect(fieldsOf(collections, 3).status).toBe('pending');
   });
 
+  it('a product that fails three passes in a row is skipped', async () => {
+    const products = [product(1), product(2), product(3)];
+    const failing = { status: 500, body: { error: { message: 'Internal error encountered.' } } };
+    const statuses = { [offerOf(1)]: approved(), [offerOf(3)]: approved() };
+    const { env, google, collections } = setup(products, { statuses, productsGetErrors: { [offerOf(2)]: failing } });
+    let job = newStatusRefreshJob(NOW);
+    for (let n = 1; n <= 3; n++) {
+      const pass = await statusRefreshPass(env, job);
+      expect(pass.failure).toMatchObject({ kind: 'server', status: 500 });
+      job = pass.job;
+      expect(job).toMatchObject({ status: 'running', cursor: idOf(1), checked: 1, stuck_cursor: idOf(1), stuck_count: n });
+    }
+    google.requests.length = 0;
+    const pass = await statusRefreshPass(env, job);
+    expect(pass.failure).toBeUndefined();
+    expect(google.requests.some((request) => request.path.includes(offerOf(2)))).toBe(false);
+    expect(pass.job).toMatchObject({
+      status: 'done', cursor: idOf(3), checked: 3, counters: { approved: 2, pending: 1 }, stuck_cursor: null, stuck_count: 0,
+    });
+    // Skipped, not written: its stored status stays.
+    expect(fieldsOf(collections, 2).date_status).toBeUndefined();
+  });
+
   it('a refused key on any part is the run’s failure', async () => {
     const products = [product(1), product(2), product(3)];
     const errors = {

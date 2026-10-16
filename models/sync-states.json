@@ -51,7 +51,9 @@
         "date_started": { "type": "date" },
         "date_first_pass": { "type": "date", "description": "When the first pass came: the refresh's length counts from here" },
         "date_finished": { "type": "date" },
-        "duration_ms": { "type": "int", "description": "From the first pass to the end: the next refresh waits max(1 h, 3 × this)" }
+        "duration_ms": { "type": "int", "description": "From the first pass to the end: the next refresh waits max(1 h, 3 × this)" },
+        "stuck_cursor": { "type": "string", "description": "The cursor where passes stopped at a product whose status read failed" },
+        "stuck_count": { "type": "int", "description": "Passes in a row that stopped there: after 3 the next pass skips the product as pending" }
       }
     },
     "orphan_scan": {

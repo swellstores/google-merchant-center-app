@@ -50,6 +50,9 @@ export interface StatusRefreshJob {
   date_first_pass?: string | null;
   date_finished?: string | null;
   duration_ms?: number | null;
+  /** The cursor where passes stopped at a failed status read, and how many passes in a row */
+  stuck_cursor?: string | null;
+  stuck_count?: number;
 }
 
 export interface StatusSummary {
@@ -68,6 +71,8 @@ export const MISSING_RESEND_MS = 86_400_000;
 export const MAX_TALLIES = 30;
 export const TOP_ISSUES = 5;
 export const MAX_SAMPLES = 3;
+/** Passes in a row stopped by one product's failed status read, after which the next pass skips it as pending. */
+export const STUCK_PASSES = 3;
 
 export function newStatusRefreshJob(now: number): StatusRefreshJob {
   return {
@@ -81,6 +86,8 @@ export function newStatusRefreshJob(now: number): StatusRefreshJob {
     date_first_pass: null,
     date_finished: null,
     duration_ms: null,
+    stuck_cursor: null,
+    stuck_count: 0,
   };
 }
 
@@ -167,7 +174,8 @@ function tally(tallies: IssueTally[], product: SwellProduct, issues: StatusIssue
  * into one Google batch, so its status is whole; a product is written only
  * when its status changed. The cursor stops before the first product that did
  * not fit the batch or the round trip's writes, or whose answer was a rate
- * limit or a server error: it comes first in the next pass.
+ * limit or a server error: it comes first in the next pass. A product whose
+ * read stopped `STUCK_PASSES` passes in a row is skipped and counted pending.
  *
  * `page` is the answer to `statusPageRead(job)` when the caller has it;
  * otherwise the page is read with the writes that wait. One round trip after
@@ -186,10 +194,12 @@ export async function statusRefreshPass(
   const answer = page === undefined ? (await env.outbox.send([statusPageRead(job)]))[0] : page;
   const products = listOf<SwellProduct>(answer, 'the products to check');
   const appId = env.ctx.appId;
+  // The product after the cursor is the one whose read stopped the last passes.
+  const stuck = (job.stuck_count ?? 0) >= STUCK_PASSES && job.stuck_cursor === job.cursor ? products[0] : undefined;
 
   const entries: Entry[] = [];
   let parts = 0;
-  for (const product of products) {
+  for (const product of stuck ? products.slice(1) : products) {
     const fields: GoogleFields = product.$app?.[appId] ?? {};
     const inputIds = (fields.input_ids ?? []).slice(0, MAX_BATCH_PARTS);
     if (parts + inputIds.length > MAX_BATCH_PARTS) break;
@@ -223,6 +233,13 @@ export async function statusRefreshPass(
   // The round trip stays in one server wave with the writes that wait and the caller's reads.
   const cap = Math.min(STATUS_WRITES, SWELL_WAVE - reads.length - env.outbox.size);
   let counted = 0;
+  if (stuck) {
+    next.counters.pending++;
+    next.checked++;
+    next.cursor = stuck.id;
+    counted++;
+  }
+  let failedRead = false;
   for (const [i, { product, fields, inputIds }] of entries.entries()) {
     if (!inputIds.length) {
       if (fields.status) {
@@ -230,7 +247,10 @@ export async function statusRefreshPass(
         tally(next.issues, product, fields.status_issues ?? []);
       }
     } else {
-      if (checks[i].some((check) => check instanceof GoogleApiError)) break;
+      if (checks[i].some((check) => check instanceof GoogleApiError)) {
+        failedRead = true;
+        break;
+      }
       const offers = checks[i] as OfferAnswer[];
       // An offer just sent that Google does not hold yet is plain pending: no issue, no write.
       const inGoogle = productStatus(offers, { missing: !justSent(fields, now) });
@@ -250,6 +270,14 @@ export async function statusRefreshPass(
     next.checked++;
     next.cursor = product.id;
     counted++;
+  }
+
+  if (failedRead) {
+    next.stuck_count = job.stuck_cursor === next.cursor ? (job.stuck_count ?? 0) + 1 : 1;
+    next.stuck_cursor = next.cursor;
+  } else if (next.cursor !== job.cursor) {
+    next.stuck_cursor = null;
+    next.stuck_count = 0;
   }
 
   if (products.length < STATUS_PAGE && counted === products.length) {
