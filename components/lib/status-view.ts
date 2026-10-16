@@ -49,6 +49,8 @@ export interface StatusPanelModel {
   /** "Checked just now", only for a live answer */
   checked: string | null;
   note: string | null;
+  /** Google's refusal of part of the product at the last send */
+  refusal: string | null;
   markets: { market: string; heading: string; offers: { title: string; tone: Tone; text: string; issues: OfferIssue[] }[] }[];
   /** Stored issues when there is no live answer */
   issues: StatusIssue[];
@@ -132,6 +134,7 @@ export function statusPanelModel(view: ProductStatusView, now: number): StatusPa
     headline: { tone: headline.tone, text: headline.text },
     checked: live && view.live ? checkedText(view.live.checked_at, now) : null,
     note: noteOf(view),
+    refusal: view.stored.sync_state === 'error' && view.stored.sync_error ? `Google refused part of this product: ${view.stored.sync_error}` : null,
     markets: [...markets.values()],
     issues: live ? [] : (view.stored.status_issues ?? []),
     canResend: view.connected && !excluded,

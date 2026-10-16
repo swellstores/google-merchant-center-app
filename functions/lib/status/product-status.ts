@@ -47,6 +47,7 @@ export interface ProductStatus {
 type OfferStatus = 'approved' | 'partial' | 'pending' | 'disapproved';
 
 export const MISSING_ISSUE = 'missing_in_google';
+export const REFUSED_ISSUE = 'refused_by_google';
 
 const MAX_ISSUES = 10;
 const MAX_OFFERS_PER_ISSUE = 20;
@@ -163,15 +164,22 @@ export function pendingStatus(): ProductStatus {
   return build('pending', LABELS.pending, []);
 }
 
+const refusal = (message: string, inputIds: string[]): StatusIssue => ({
+  code: REFUSED_ISSUE,
+  severity: 'disapproved',
+  description: message,
+  offers: inputIds.slice(0, MAX_OFFERS_PER_ISSUE),
+  countries: [],
+});
+
 export function refusedStatus(message: string, inputIds: string[]): ProductStatus {
-  const issue: StatusIssue = {
-    code: 'refused_by_google',
-    severity: 'disapproved',
-    description: message,
-    offers: inputIds.slice(0, MAX_OFFERS_PER_ISSUE),
-    countries: [],
-  };
-  return build('not_sent', 'Not sent: Google refused it', [issue]);
+  return build('not_sent', 'Not sent: Google refused it', [refusal(message, inputIds)]);
+}
+
+/** A product Google took only in part: its message comes first among the issues, and an approved product is partly approved. */
+export function partlyRefused(status: ProductStatus, message: string): ProductStatus {
+  const approved = status.status === 'approved';
+  return build(approved ? 'partial' : status.status, approved ? LABELS.partial : status.label, [refusal(message, []), ...status.issues].slice(0, MAX_ISSUES));
 }
 
 export function earliestExpiry(answers: OfferAnswer[]): number | null {

@@ -140,6 +140,7 @@ export default function GoogleStatus(props: ComponentProps) {
             {view.stored.status === 'excluded' && <span class="gmc-muted">Turn off “Hide from Google” below to list it again.</span>}
             {model.note && <span class="gmc-muted">{model.note}</span>}
           </Stack>
+          {model.refusal && <Notice tone="bad">{model.refusal}</Notice>}
           {model.markets.length > 0 && (
             <Stack gap={24}>
               {model.markets.map((group) => (

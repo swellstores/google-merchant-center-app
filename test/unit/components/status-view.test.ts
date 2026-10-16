@@ -95,6 +95,16 @@ describe('statusPanelModel', () => {
     expect(live.checked).toBe('Checked just now');
   });
 
+  it("the status panel shows Google's refusal", () => {
+    const live = { checked_at: '2026-10-16T12:00:00Z', more: 0, offers: [offer()] };
+    const stored = { status: 'partial' as const, status_label: 'Partly approved', sync_state: 'error' as const, sync_error: 'Invalid GTIN [gtin]' };
+    expect(statusPanelModel(view({ stored, live }), NOW).refusal).toBe('Google refused part of this product: Invalid GTIN [gtin]');
+    expect(statusPanelModel(view({ stored, connected: false }), NOW).refusal).toBe('Google refused part of this product: Invalid GTIN [gtin]');
+    expect(statusPanelModel(view({ stored: { ...stored, sync_error: null } }), NOW).refusal).toBeNull();
+    expect(statusPanelModel(view({ stored: { ...stored, sync_state: 'sent' } }), NOW).refusal).toBeNull();
+    expect(statusPanelModel(view(), NOW).refusal).toBeNull();
+  });
+
   it('a product never sent reads Not sent', () => {
     const model = statusPanelModel(view({ stored: {} }), NOW);
     expect(model.headline).toEqual({ tone: 'neutral', text: 'Not sent' });

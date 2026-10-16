@@ -9,6 +9,7 @@ import { enqueueWrite } from '../sync/queue';
 import { iso } from '../time';
 import {
   earliestExpiry,
+  partlyRefused,
   productStatus,
   SEVERITY_ORDER,
   statusFields,
@@ -212,12 +213,16 @@ export async function statusRefreshPass(
   let counted = 0;
   for (const [i, { product, fields, inputIds }] of entries.entries()) {
     if (!inputIds.length) {
-      if (fields.status) next.counters[fields.status]++;
+      if (fields.status) {
+        next.counters[fields.status]++;
+        tally(next.issues, product, fields.status_issues ?? []);
+      }
     } else {
       if (checks[i].some((check) => check instanceof GoogleApiError)) break;
       const offers = checks[i] as OfferAnswer[];
       // An offer just sent that Google does not hold yet is plain pending: no issue, no write.
-      const status = productStatus(offers, { missing: !justSent(fields, now) });
+      const inGoogle = productStatus(offers, { missing: !justSent(fields, now) });
+      const status = fields.sync_state === 'error' && fields.sync_error ? partlyRefused(inGoogle, fields.sync_error) : inGoogle;
       const resend = resendDue(offers, fields, now);
       const ops: BatchOp[] = [];
       if (status.hash !== fields.status_hash) {

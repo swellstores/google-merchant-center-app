@@ -3,6 +3,7 @@ import type { Market } from '../../../functions/lib/connection/markets';
 import {
   pendingStatus,
   productStatus,
+  refusedStatus,
   statusFields,
   type GoogleProductStatus,
   type ProductStatus,
@@ -183,6 +184,41 @@ describe('status refresh pass', () => {
     expect(pass.job).toMatchObject({
       status: 'done', cursor: idOf(3), checked: 3, counters: { approved: 0, partial: 0, pending: 0, disapproved: 0, not_sent: 1, excluded: 1 },
     });
+  });
+
+  it("a refused product's stored issue reaches the tally", async () => {
+    const refused = refusedStatus('Invalid GTIN', [offerOf(1)]);
+    const products = [
+      { id: idOf(1), name: 'P1', $app: { [APP_ID]: { sync_state: 'error', sync_error: 'Invalid GTIN', input_ids: [], ...storedStatus(refused) } } },
+      { id: idOf(2), name: 'P2', $app: { [APP_ID]: { sync_state: 'skipped', input_ids: [], status: 'excluded', status_issues: [] } } },
+    ];
+    const { env, google } = setup(products);
+    const pass = await statusRefreshPass(env, newStatusRefreshJob(NOW));
+    expect(google.batches()).toBe(0);
+    expect(pass.job.counters).toMatchObject({ not_sent: 1, excluded: 1 });
+    expect(pass.job.issues).toEqual([
+      { code: 'refused_by_google', severity: 'disapproved', description: 'Invalid GTIN', products: 1, samples: [{ id: idOf(1), name: 'P1' }] },
+    ]);
+    expect(summaryOf(pass.job).top_issues.map((issue) => issue.code)).toEqual(['refused_by_google']);
+  });
+
+  it("a partly refused product is partly approved with Google's message", async () => {
+    const refusal = { sync_state: 'error', sync_error: 'Invalid GTIN [gtin]' };
+    const products = [product(1, 1, refusal), product(2, 1, refusal), product(3, 1, { sync_state: 'sent', sync_error: null })];
+    const statuses = { [offerOf(1)]: approved(), [offerOf(2)]: disapproved('image_too_small'), [offerOf(3)]: approved() };
+    const { env, swell, collections } = setup(products, { statuses });
+    const pass = await statusRefreshPass(env, newStatusRefreshJob(NOW));
+    const issue = { code: 'refused_by_google', severity: 'disapproved', description: 'Invalid GTIN [gtin]', offers: [], countries: [] };
+    expect(fieldsOf(collections, 1)).toMatchObject({ status: 'partial', status_label: 'Partly approved', status_issues: [issue] });
+    expect(fieldsOf(collections, 2)).toMatchObject({ status: 'disapproved', status_label: 'Disapproved' });
+    expect(fieldsOf(collections, 2).status_issues.map((i: { code: string }) => i.code)).toEqual(['refused_by_google', 'image_too_small']);
+    expect(fieldsOf(collections, 2).status_hash).not.toBe(statusOf(2, disapproved('image_too_small')).hash);
+    expect(fieldsOf(collections, 3)).toMatchObject({ status: 'approved', status_issues: [] });
+    expect(pass.job.counters).toMatchObject({ approved: 1, partial: 1, disapproved: 1 });
+    expect(pass.job.issues.find((tally) => tally.code === 'refused_by_google')).toMatchObject({ severity: 'disapproved', products: 2 });
+    swell.post.mockClear();
+    await statusRefreshPass(env, newStatusRefreshJob(NOW));
+    expect(productPuts(swell)).toEqual([]);
   });
 
   it('requeues a product whose offer expires within 7 days', async () => {
