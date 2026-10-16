@@ -2,7 +2,9 @@ import type { ComponentChildren } from 'preact';
 import { createPortal } from 'preact/compat';
 import { useEffect, useRef } from 'preact/hooks';
 
-export type Tone = 'ok' | 'bad' | 'info' | 'neutral';
+import type { Tone } from './tone';
+
+export type { Tone };
 
 const CSS = `
 .gmc {
@@ -81,6 +83,21 @@ const CSS = `
 .gmc-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
 .gmc-facts dt { color: var(--muted); }
 .gmc-facts dd { margin: 0; min-width: 0; }
+.gmc-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+@container (min-width: 560px) { .gmc-stats { grid-template-columns: repeat(3, 1fr); } }
+.gmc-stat { background: var(--subtle); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 2px; }
+.gmc-stat-value { font-size: 24px; font-weight: 700; line-height: 1.2; }
+.gmc-stat.ok .gmc-stat-value { color: var(--ok); }
+.gmc-stat.bad .gmc-stat-value { color: var(--bad); }
+.gmc-stat.info .gmc-stat-value { color: var(--info); }
+.gmc-progress { display: flex; flex-direction: column; gap: 4px; }
+.gmc-progress-head { display: flex; justify-content: space-between; gap: 8px; }
+.gmc-bar { height: 8px; border-radius: 999px; background: var(--subtle); border: 1px solid var(--border); overflow: hidden; }
+.gmc-bar > span { display: block; height: 100%; background: var(--accent); }
+.gmc-bar.unknown > span { width: 30%; animation: gmc-slide 1.4s ease-in-out infinite alternate; }
+@keyframes gmc-slide { from { margin-left: 0; } to { margin-left: 70%; } }
+@media (prefers-reduced-motion: reduce) { .gmc-bar.unknown > span { animation: none; } }
+.gmc-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; }
 .gmc-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; }
 .gmc-modal { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 20px; width: min(480px, 90vw); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); display: flex; flex-direction: column; gap: 12px; }
 .gmc-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -140,6 +157,32 @@ export function ExternalLink({ href, children }: { href: string; children: Compo
     <a href={href} target="_blank" rel="noopener noreferrer">
       {children} ↗
     </a>
+  );
+}
+
+export function Stat({ label, value, tone }: { label: string; value: number | null; tone: Tone }) {
+  return (
+    <div class={cx('gmc-stat', tone)}>
+      <span class="gmc-muted">{label}</span>
+      <span class="gmc-stat-value">{value === null ? '—' : value.toLocaleString('en-US')}</span>
+    </div>
+  );
+}
+
+/** A bar with a known total, or a moving one while the total is not known. */
+export function Progress({ label, done, total }: { label: string; done: number; total: number | null }) {
+  const known = total !== null && total > 0;
+  const percent = known ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  return (
+    <div class="gmc-progress">
+      <div class="gmc-progress-head">
+        <span>{label}</span>
+        <span class="gmc-muted">{total === null ? done.toLocaleString('en-US') : `${done.toLocaleString('en-US')} of ${total.toLocaleString('en-US')}`}</span>
+      </div>
+      <div class={cx('gmc-bar', !known && 'unknown')} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={known ? total : undefined} aria-valuenow={known ? done : undefined}>
+        <span style={known ? { width: `${percent}%` } : undefined} />
+      </div>
+    </div>
   );
 }
 
