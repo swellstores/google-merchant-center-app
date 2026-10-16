@@ -54,6 +54,8 @@ interface Run {
   waiting: number;
   /** The answer to the first pass's read, made with the run mark */
   prefetched?: unknown;
+  /** The catalog sync job the start read saw, which a prefetched page belongs to */
+  startJob?: FullSyncJob | null;
   /** The state as the last round trip of the run read it */
   latest?: SyncState | null;
 }
@@ -172,8 +174,11 @@ async function work(run: Run): Promise<WorkResult> {
   }
   const queueMore = left || items.length > 0 || waiting > 0;
 
-  // Without the page in hand, a pass reads it with the writes that wait.
-  let page = run.queue.length ? undefined : run.prefetched;
+  // Without the page in hand, a pass reads it with the writes that wait. A
+  // page read for another job (activate restarted it as the run marked
+  // itself) is read again.
+  const samePage = job?.date_started === run.startJob?.date_started && job?.cursor === run.startJob?.cursor;
+  let page = run.queue.length || !samePage ? undefined : run.prefetched;
   while (!failure && !queueMore && job?.status === 'running' && gate(page === undefined ? 3 : 2)) {
     passes++;
     const pass = await fullSyncPass(env, job, [reread], page);
@@ -303,6 +308,7 @@ export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
     queue: start.queue,
     waiting: start.waiting,
     prefetched: read ? answers[marking.length - 1] : undefined,
+    startJob: state?.full_sync,
   };
 
   let result: WorkResult;

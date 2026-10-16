@@ -182,6 +182,29 @@ describe('runCourier', () => {
     expect((await loadState(swell)).full_sync).toEqual(restarted);
   });
 
+  it('reads the page again when the catalog sync restarts as the run marks itself', async () => {
+    const products = many(PASS_PRODUCTS + 3);
+    const { ctx, swell, google } = await steady(products);
+    const ids = products.map((p) => p.id).sort();
+    const state = await loadState(swell);
+    const old = { status: 'running', cursor: ids[PASS_PRODUCTS - 1], total: 10, done: PASS_PRODUCTS, date_started: at(NOW - 60_000) };
+    await saveState(swell, state.id, { full_sync: { $set: old } });
+    const restarted = { status: 'running', cursor: null, total: 0, done: 0, date_started: at(NOW) };
+    const post = swell.post.getMockImplementation()!;
+    let injected = false;
+    swell.post.mockImplementation(async (url: string, data: any) => {
+      if (url === '/:batch' && !injected && data.some((op: any) => op.data?.running_since)) {
+        injected = true;
+        await saveState(swell, state.id, { full_sync: { $set: restarted } });
+      }
+      return post(url, data);
+    });
+    await runCourier(ctx);
+    // The restarted sync sends the whole catalog from the start, p00–p06 included.
+    expect([...google.inputs.keys()].map((key) => key.split('~')[2]).sort()).toEqual(ids);
+    expect((await loadState(swell)).full_sync).toMatchObject({ status: 'done', date_started: at(NOW), cursor: ids.at(-1), done: ids.length });
+  });
+
   it('backs off after a rate limit and keeps the queue', async () => {
     const { ctx, swell } = setup({ batch: { status: 429, body: { error: { message: 'quota/request_rate_too_high' } } } });
     await enqueue(swell, { productId: 'p1', kind: 'full' });
