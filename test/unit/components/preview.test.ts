@@ -50,11 +50,11 @@ describe('previewModel', () => {
   });
 
   it('no price shows the skip reason', () => {
-    expect(previewModel(product({ price: null }), CONTEXT)).toEqual({ skipped: 'Not sent: no price' });
+    expect(previewModel(product({ price: null }), CONTEXT)).toEqual({ skipped: 'Not sent: no price. This product will not appear in Google Shopping.' });
   });
 
   it('an unsaved image without a url shows the skip reason', () => {
-    expect(previewModel(product({ images: [{ file: {} }] }), CONTEXT)).toEqual({ skipped: 'Not sent: no image' });
+    expect(previewModel(product({ images: [{ file: {} }] }), CONTEXT)).toEqual({ skipped: 'Not sent: no image. This product will not appear in Google Shopping.' });
   });
 
   it('hidden shows the label alone; other skips add the consequence', () => {
