@@ -2,10 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { Market } from '../../../functions/lib/connection/markets';
 import { Outbox } from '../../../functions/lib/swell-batch';
 import type { DeliveryEnv } from '../../../functions/lib/sync/deliver';
-import { fullSyncPass, JOB_PAGE, startFullSync } from '../../../functions/lib/sync/full-sync';
-import { loadAlarm } from '../../../functions/lib/sync/alarm';
+import { fullSyncPass, JOB_PAGE } from '../../../functions/lib/sync/full-sync';
 import { takeQueue } from '../../../functions/lib/sync/queue';
-import { loadState, newFullSyncJob, stateById } from '../../../functions/lib/sync/state';
+import { newFullSyncJob, stateById } from '../../../functions/lib/sync/state';
 import { Budget } from '../../../functions/lib/time';
 import { fixedClock, NOW, steppingClock, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
@@ -27,14 +26,6 @@ function setup(products: Record<string, any>[], googleOptions: FakeGoogleOptions
 }
 
 describe('catalog sync', () => {
-  it('starts with the product count and wakes the courier now', async () => {
-    const { swell } = createFakeSwell({ products: [product(1), product(2)] });
-    const job = await startFullSync(testContext(swell));
-    expect(job).toMatchObject({ status: 'running', cursor: null, total: 2, done: 0 });
-    expect((await loadState(swell)).full_sync).toMatchObject({ status: 'running', total: 2 });
-    expect((await loadAlarm(swell)).wake_at).toBe(new Date(NOW).toISOString());
-  });
-
   it('sends one page and moves the cursor past it', async () => {
     const products = Array.from({ length: JOB_PAGE + 3 }, (_, i) => product(i + 1));
     const { google, env } = setup(products);

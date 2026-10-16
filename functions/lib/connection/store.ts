@@ -25,6 +25,8 @@ export interface PublicConnection {
   status: ConnectionStatus;
   merchant_id: string | null;
   client_email: string | null;
+  /** A key is stored and can be checked again without pasting it */
+  has_key: boolean;
   last_error: string | null;
   date_connected: string | null;
 }
@@ -79,6 +81,7 @@ export function publicConnection(connection: Connection | null): PublicConnectio
     status: connection?.status ?? 'disconnected',
     merchant_id: connection?.merchant_id ?? null,
     client_email: connection?.client_email ?? null,
+    has_key: Boolean(connection?.private_key),
     last_error: connection?.last_error ?? null,
     date_connected: connection?.date_connected ?? null,
   };

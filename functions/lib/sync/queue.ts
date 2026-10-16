@@ -93,7 +93,7 @@ export const productItemsRead = (productIds: string[]): BatchOp => ({
   data: { where: { product_id: { $in: productIds } }, sort: 'date_created asc', limit: 1000 },
 });
 
-const removal = (id: string): BatchOp => ({ method: 'delete', url: `${COLLECTION}/${id}` });
+export const itemRemoval = (id: string): BatchOp => ({ method: 'delete', url: `${COLLECTION}/${id}` });
 
 export async function takeQueue(swell: SwellClient, limit: number): Promise<QueueItem[]> {
   const list = await swell.get(COLLECTION, takeRead(limit).data);
@@ -178,7 +178,7 @@ export function settleWrites(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]
       },
     });
   }
-  writes.push(...removed.map(removal));
+  writes.push(...removed.map(itemRemoval));
   return { writes, removed };
 }
 
@@ -190,6 +190,6 @@ export async function clearQueue(swell: SwellClient): Promise<void> {
     // Deletes that keep failing would otherwise loop forever.
     if (!items.length || ids === previous) return;
     previous = ids;
-    await swellBatch(swell, items.map((item) => removal(item.id)));
+    await swellBatch(swell, items.map((item) => itemRemoval(item.id)));
   }
 }

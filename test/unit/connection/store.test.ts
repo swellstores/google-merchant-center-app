@@ -81,10 +81,11 @@ describe('connection record', () => {
       status: 'connected',
       merchant_id: '123',
       client_email: 'a@b.c',
+      has_key: true,
       last_error: null,
       date_connected: '2026-10-15T10:00:00.000Z',
     });
     expect(JSON.stringify(view)).not.toContain('secret');
-    expect(publicConnection(null).status).toBe('disconnected');
+    expect(publicConnection(null)).toMatchObject({ status: 'disconnected', has_key: false });
   });
 });

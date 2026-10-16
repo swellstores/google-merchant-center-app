@@ -1,41 +1,13 @@
 import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
+import { checkThenActivate, type Phase, type StatusView } from './lib/connect-flow';
 import { COUNTRIES } from './lib/countries';
 import { summarizeKey } from './lib/key-file';
 import { type CheckResult as Check, stepStates } from './lib/steps';
 import { Button, Card, ExternalLink, Label, Modal, Notice, Pill, Root, Step } from './lib/ui';
 
 export const config = { description: 'Connect the store to Google Merchant Center with a service account key' };
-
-type Status = 'connected' | 'broken' | 'disconnected';
-
-interface ConnectionView {
-  status: Status;
-  merchant_id: string | null;
-  client_email: string | null;
-  last_error: string | null;
-  date_connected: string | null;
-}
-
-interface MarketView {
-  country: string;
-  language: string;
-  currency: string;
-  link_template: string;
-}
-
-interface StatusView {
-  connection: ConnectionView;
-  market: MarketView | null;
-  defaults: { link_template: string };
-}
-
-interface ConnectResult {
-  connection: ConnectionView;
-  market: MarketView | null;
-  report: { ok: boolean; checks: Check[] };
-}
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const countryName = (code: string) => COUNTRIES.find(([c]) => c === code)?.[1] ?? code;
@@ -45,7 +17,7 @@ const value = (event: Event) => (event.currentTarget as HTMLInputElement).value;
 export default function GoogleConnect(props: ComponentProps) {
   const [view, setView] = useState<StatusView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<Phase | 'disconnecting' | null>(null);
   const [keyText, setKeyText] = useState('');
   const [merchantId, setMerchantId] = useState('');
   const [country, setCountry] = useState('US');
@@ -76,24 +48,26 @@ export default function GoogleConnect(props: ComponentProps) {
   const email = summary && 'clientEmail' in summary ? summary.clientEmail : view?.connection.client_email;
 
   async function connect() {
-    setBusy(true);
     setError(null);
     try {
-      const result = await callRoute<ConnectResult>(props.fetch, 'connection', {
-        op: 'connect',
-        key: keyText || undefined,
-        merchant_id: merchantId.trim(),
-        country,
-        link_template: linkTemplate.trim(),
-      });
-      setChecks(result.report.checks);
-      setAllOk(result.report.ok);
-      setView((current) => current && { ...current, connection: result.connection, market: result.market });
-      if (result.report.ok) setKeyText('');
+      const next = await checkThenActivate(
+        (body) => callRoute(props.fetch, 'connection', body),
+        { key: keyText || undefined, merchant_id: merchantId.trim(), country, link_template: linkTemplate.trim() },
+        {
+          phase: setBusy,
+          checked: (answer) => {
+            setChecks(answer.report.checks);
+            setAllOk(answer.report.ok);
+            setView((current) => current && { ...current, connection: answer.connection });
+            if (answer.report.ok) setKeyText('');
+          },
+        },
+      );
+      if (next) setView(next);
     } catch (e) {
       setError(messageOf(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -108,7 +82,7 @@ export default function GoogleConnect(props: ComponentProps) {
   }
 
   async function disconnect() {
-    setBusy(true);
+    setBusy('disconnecting');
     setError(null);
     try {
       const next = await callRoute<StatusView>(props.fetch, 'connection', { op: 'disconnect', remove_products: removeProducts });
@@ -119,7 +93,7 @@ export default function GoogleConnect(props: ComponentProps) {
     } catch (e) {
       setError(messageOf(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -169,7 +143,7 @@ export default function GoogleConnect(props: ComponentProps) {
   const connected = status === 'connected';
   const failedCheck = checks.some((check) => !check.ok);
   const states = stepStates(checks, allOk);
-  const storedKey = !!view.connection.client_email;
+  const storedKey = view.connection.has_key;
 
   const guide = (
     <div class="gmc-steps">
@@ -263,11 +237,11 @@ export default function GoogleConnect(props: ComponentProps) {
         </Label>
       </div>
       <div class="gmc-actions">
-        <Button disabled={busy} onClick={requestConnect}>
-          {busy ? 'Checking…' : status === 'disconnected' ? 'Connect' : 'Check again'}
+        <Button disabled={!!busy} onClick={requestConnect}>
+          {busy === 'checking' ? 'Checking…' : busy === 'activating' ? 'Starting sync…' : status === 'disconnected' ? 'Connect' : 'Check again'}
         </Button>
         {status !== 'disconnected' && (
-          <Button kind="danger-text" disabled={busy} onClick={() => setConfirming(true)}>
+          <Button kind="danger-text" disabled={!!busy} onClick={() => setConfirming(true)}>
             Disconnect
           </Button>
         )}
@@ -338,7 +312,7 @@ export default function GoogleConnect(props: ComponentProps) {
             <Button kind="secondary" onClick={() => setChangingCountry(false)}>
               Cancel
             </Button>
-            <Button kind="danger" disabled={busy} onClick={changeCountry}>
+            <Button kind="danger" disabled={!!busy} onClick={changeCountry}>
               Change country
             </Button>
           </div>
@@ -357,7 +331,7 @@ export default function GoogleConnect(props: ComponentProps) {
             <Button kind="secondary" onClick={() => setConfirming(false)}>
               Cancel
             </Button>
-            <Button kind="danger" disabled={busy} onClick={disconnect}>
+            <Button kind="danger" disabled={!!busy} onClick={disconnect}>
               Disconnect
             </Button>
           </div>

@@ -1,24 +1,12 @@
-import type { AppContext } from '../context';
 import type { GoogleApiError } from '../google/http';
 import type { SwellProduct } from '../mapping/types';
 import { listOf, type BatchOp } from '../swell-batch';
 import { iso } from '../time';
-import { setAlarm } from './alarm';
 import { deliver, type DeliveryEnv } from './deliver';
 import { enqueueWrite, productItemsRead, type QueueItem, type WorkUnit } from './queue';
-import { loadState, saveState, type FullSyncJob } from './state';
+import type { FullSyncJob } from './state';
 
 export const JOB_PAGE = 25;
-
-/** Sends the whole catalog: a cursor over product ids that the courier advances. */
-export async function startFullSync(ctx: AppContext): Promise<FullSyncJob> {
-  const state = await loadState(ctx.swell);
-  const count = await ctx.swell.get('/products', { limit: 1, fields: 'id' });
-  const job: FullSyncJob = { status: 'running', cursor: null, total: count?.count ?? 0, done: 0, date_started: iso(ctx.now()), date_finished: null };
-  await saveState(ctx.swell, state.id, { full_sync: { $set: job } });
-  await setAlarm(ctx, ctx.now());
-  return job;
-}
 
 export interface PassResult {
   job: FullSyncJob;
@@ -30,7 +18,8 @@ export interface PassResult {
 }
 
 /**
- * One page of the catalog. The cursor moves past the whole page unless the run
+ * One page of the catalog sync, a cursor over product ids that the courier
+ * advances (`newFullSyncJob` starts one). The cursor moves past the whole page unless the run
  * failed (then only over the leading done products); products that were kept
  * or never reached go to the queue, which continues them across runs. One
  * round trip after Google's answer sends the waiting writes and reads what the

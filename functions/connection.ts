@@ -1,5 +1,5 @@
 import { errorResponse, requireAdmin } from './lib/admin';
-import { connect, connectionStatus, disconnect } from './lib/connection/connect';
+import { activate, check, connectionStatus, disconnect } from './lib/connection/connect';
 import { AppError, contextFrom } from './lib/context';
 
 export const config: SwellConfig = {
@@ -14,18 +14,17 @@ export async function get(req: SwellRequest) {
   return connectionStatus(contextFrom(req));
 }
 
+/** `check` stores the key and asks Google; `activate` then sets up the market and starts syncing. */
 export async function post(req: SwellRequest) {
   requireAdmin(req);
   const ctx = contextFrom(req);
   const body: Record<string, any> = typeof req.body === 'object' && req.body ? req.body : {};
   try {
-    if (body.op === 'connect') {
-      return await connect(ctx, {
-        key: text(body.key),
-        merchant_id: text(body.merchant_id) ?? '',
-        country: text(body.country) ?? '',
-        link_template: text(body.link_template) ?? '',
-      });
+    if (body.op === 'check') {
+      return await check(ctx, { key: text(body.key), merchant_id: text(body.merchant_id) ?? '' });
+    }
+    if (body.op === 'activate') {
+      return await activate(ctx, { country: text(body.country) ?? '', link_template: text(body.link_template) ?? '' });
     }
     if (body.op === 'disconnect') {
       await disconnect(ctx, body.remove_products === true);

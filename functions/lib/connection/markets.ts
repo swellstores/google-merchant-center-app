@@ -36,20 +36,27 @@ async function dropDataSource(ctx: AppContext, token: string, name: string): Pro
 }
 
 /**
- * Phase 1 keeps one market. The same country and language keep their data
- * source; another country or language replaces the market and removes the
- * old data source, with its products, from Google.
+ * The writes that make `next` the one market (phase 1 keeps one); the last
+ * one is the market's. The same country and language keep their data source;
+ * any other market goes, with its data source and its products in Google.
+ * Data source names carry their account: another account's are only forgotten.
  */
-export async function replaceMarket(ctx: AppContext, token: string, next: MarketInput): Promise<Market> {
-  const markets = await loadMarkets(ctx.swell);
+export async function replaceMarket(ctx: AppContext, token: string, accountId: string, markets: Market[], next: MarketInput): Promise<BatchOp[]> {
+  const ours = (market: Market) => Boolean(market.data_source?.startsWith(`accounts/${accountId}/`));
   const same = markets.find((m) => m.country === next.country && m.language === next.language);
+  const writes: BatchOp[] = [];
   for (const market of markets) {
     if (market === same) continue;
-    if (market.data_source) await dropDataSource(ctx, token, market.data_source);
-    await ctx.swell.delete(`${COLLECTION}/${market.id}`);
+    if (ours(market)) await dropDataSource(ctx, token, market.data_source!);
+    writes.push({ method: 'delete', url: `${COLLECTION}/${market.id}` });
   }
-  if (same) return ctx.swell.put(`${COLLECTION}/${same.id}`, { currency: next.currency, link_template: next.link_template });
-  return ctx.swell.post(COLLECTION, { ...next, data_source: null });
+  if (!same) {
+    writes.push({ method: 'post', url: COLLECTION, data: { ...next, data_source: null } });
+  } else {
+    const stale = same.data_source && !ours(same) ? { data_source: null } : {};
+    writes.push({ method: 'put', url: `${COLLECTION}/${same.id}`, data: { currency: next.currency, link_template: next.link_template, ...stale } });
+  }
+  return writes;
 }
 
 interface GoogleDataSource {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ensureDataSources, languageOf, loadMarkets, replaceMarket } from '../../../functions/lib/connection/markets';
+import { ensureDataSources, languageOf, loadMarkets, replaceMarket, type MarketInput } from '../../../functions/lib/connection/markets';
+import type { AppContext } from '../../../functions/lib/context';
+import { swellBatch } from '../../../functions/lib/swell-batch';
 import { testContext } from '../../helpers/context';
 import { createFakeGoogle } from '../../helpers/fake-google';
 import { createFakeSwell } from '../../helpers/fake-swell';
@@ -17,28 +19,39 @@ describe('languageOf', () => {
   });
 });
 
+/** Plans the replacement and sends its writes; resolves with the market's answer. */
+async function replace(ctx: AppContext, next: MarketInput) {
+  const writes = await replaceMarket(ctx, 'tok', '123', await loadMarkets(ctx.swell), next);
+  return (await swellBatch(ctx.swell, writes)).at(-1);
+}
+
 describe('replaceMarket', () => {
   it('creates the first market', async () => {
     const { swell } = createFakeSwell();
-    const market = await replaceMarket(testContext(swell), 'tok', US);
-    expect(market).toMatchObject({ ...US, data_source: null });
+    expect(await replace(testContext(swell), US)).toMatchObject({ ...US, data_source: null });
     expect(await loadMarkets(swell)).toHaveLength(1);
   });
 
   it('updates currency and link of the same country and language, keeping its data source', async () => {
     const { swell } = createFakeSwell({ markets: [{ ...US, data_source: 'accounts/123/dataSources/1' }] });
-    const market = await replaceMarket(testContext(swell), 'tok', { ...US, link_template: 'https://new.example.com/p/{slug}' });
+    const market = await replace(testContext(swell), { ...US, link_template: 'https://new.example.com/p/{slug}' });
     expect(market).toMatchObject({ link_template: 'https://new.example.com/p/{slug}', data_source: 'accounts/123/dataSources/1' });
     expect(await loadMarkets(swell)).toHaveLength(1);
   });
 
+  it('forgets a data source of another account', async () => {
+    const google = createFakeGoogle();
+    const { swell } = createFakeSwell({ markets: [{ ...US, data_source: 'accounts/999/dataSources/1' }] });
+    expect(await replace(testContext(swell, google.fetch), US)).toMatchObject({ data_source: null });
+    expect(google.requests).toHaveLength(0);
+  });
+
   it('replaces a market of another country and deletes its data source in Google', async () => {
     const google = createFakeGoogle();
-    const { swell } = createFakeSwell();
+    const { swell } = createFakeSwell({ markets: [US] });
     const ctx = testContext(swell, google.fetch);
-    const [first] = await ensureDataSources(ctx, 'tok', '123', [await replaceMarket(ctx, 'tok', US)]);
-    const next = await replaceMarket(ctx, 'tok', { ...US, country: 'GB', currency: 'GBP' });
-    expect(next).toMatchObject({ country: 'GB', data_source: null });
+    const [first] = await ensureDataSources(ctx, 'tok', '123', await loadMarkets(swell));
+    expect(await replace(ctx, { ...US, country: 'GB', currency: 'GBP' })).toMatchObject({ country: 'GB', data_source: null });
     expect(google.dataSources.has(first.data_source!)).toBe(false);
     expect((await loadMarkets(swell)).map((m) => m.country)).toEqual(['GB']);
   });
