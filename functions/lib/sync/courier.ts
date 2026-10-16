@@ -5,12 +5,15 @@ import { measured, type AppContext } from '../context';
 import { GoogleApiError } from '../google/http';
 import type { OfferDefaults } from '../mapping/offers';
 import type { SwellProduct } from '../mapping/types';
+import { newOrphanScanJob, orphanScanPass } from '../status/orphans';
+import { newStatusRefreshJob, statusPageRead, statusRefreshPass, summaryOf, type StatusRefreshJob } from '../status/refresh';
+import { orphanScanDue, refreshDue } from '../status/schedule';
 import { countOf, listOf, Outbox, recordOf, SWELL_WAVE, swellBatch, type BatchOp } from '../swell-batch';
 import { Budget, iso, nextNoonUtc } from '../time';
 import { alarmRead, alarmWrite, type Alarm } from './alarm';
 import { deliver, PASS_PRODUCTS, productIdsOf, productsOf, productsRead, type DeliveryEnv } from './deliver';
-import { fullSyncPass, pageRead } from './full-sync';
-import { readQuota } from './quota';
+import { fullSyncPass, pageRead, type PassResult } from './full-sync';
+import { quotaDue, readQuota } from './quota';
 import { itemsRead, settleWrites, takeRead, unitsFromQueue, type QueueItem, type WorkUnit } from './queue';
 import { stateById, stateRead, stateWrite, type FullSyncJob, type SyncState } from './state';
 
@@ -28,6 +31,9 @@ export const EARLY_TOLERANCE_MS = 2000;
 // Phase 1 has no settings for defaults yet (plan 3 adds them).
 const DEFAULTS: OfferDefaults = { condition: 'new' };
 
+/** What started the run: the alarm, or the hourly cron, which also starts the status jobs that are due. */
+export type CourierTrigger = 'alarm' | 'hourly';
+
 export interface CourierOutcome {
   next: 'idle' | 'soon' | 'later' | 'paused' | 'early' | 'busy';
   sent: number;
@@ -39,13 +45,38 @@ export function pacedDelay(sentOps: number, minuteLimit?: number | null): number
   return Math.max(NEXT_RUN_MS, Math.ceil((sentOps / minuteLimit) * 60_000));
 }
 
+type JobKey = 'full_sync' | 'status_refresh' | 'orphan_scan';
+/** The cursor jobs, worked in this order once the queue is drained. */
+type Jobs = Pick<SyncState, JobKey>;
+
+const jobsOf = (state: SyncState | null): Jobs => ({
+  full_sync: state?.full_sync,
+  status_refresh: state?.status_refresh,
+  orphan_scan: state?.orphan_scan,
+});
+
+const running = <J extends { status: 'running' | 'done' }>(job: J | null | undefined): job is J => job?.status === 'running';
+
+/** The read the first pass needs, which rides with the run mark. */
+interface FirstRead {
+  kind: 'queue' | 'catalog' | 'refresh';
+  op: BatchOp;
+  /** The job whose page it reads */
+  job?: FullSyncJob | StatusRefreshJob;
+}
+
 /** What a working run knows. */
 interface Run {
   ctx: AppContext;
   budget: Budget;
   outbox: Outbox;
   connection: Connection;
+  /** When the run started */
+  now: number;
+  /** The state the mark answered, with the jobs the run started */
   state: SyncState;
+  /** The jobs as the mark found them */
+  marked: Jobs;
   quotaChanged: boolean;
   alarm: Alarm | null;
   markets: Market[];
@@ -53,21 +84,19 @@ interface Run {
   queue: QueueItem[];
   /** Items behind the head */
   waiting: number;
-  /** The answer to the first pass's read, made with the run mark */
-  prefetched?: unknown;
-  /** The catalog sync job the start read saw, which a prefetched page belongs to */
-  startJob?: FullSyncJob | null;
+  /** The first pass's read and its answer */
+  first?: FirstRead & { answer: unknown };
   /** The state as the last round trip of the run read it */
   latest?: SyncState | null;
 }
 
-type Ending = Pick<Run, 'ctx' | 'state' | 'outbox' | 'connection' | 'alarm' | 'quotaChanged' | 'latest'>;
+type Ending = Pick<Run, 'ctx' | 'state' | 'marked' | 'outbox' | 'connection' | 'alarm' | 'quotaChanged' | 'latest'>;
 
 interface WorkResult {
   sent: number;
   failure?: GoogleApiError;
   queueMore: boolean;
-  job: FullSyncJob | null | undefined;
+  jobs: Jobs;
 }
 
 /** Everything a run decides on, in one round trip. */
@@ -95,13 +124,36 @@ function idleReset(state: SyncState | null): Record<string, unknown> | null {
   return Object.keys(patch).length ? patch : null;
 }
 
-/** The read the first pass needs: the queue head's products, or the catalog's next page. */
-function firstRead(queue: QueueItem[], job: FullSyncJob | null | undefined): BatchOp | null {
+/** The status jobs an hourly run starts: those that are due. */
+function dueJobs(state: SyncState | null, now: number): Partial<Jobs> {
+  return {
+    ...(refreshDue(state?.status_refresh, now) ? { status_refresh: newStatusRefreshJob(now) } : {}),
+    ...(orphanScanDue(state?.orphan_scan, now) ? { orphan_scan: newOrphanScanJob(now) } : {}),
+  };
+}
+
+/** The read the first pass needs: the queue head's products, or the next page of the catalog sync or of the status refresh. */
+function firstRead(queue: QueueItem[], catalog: FullSyncJob | null | undefined, refresh: StatusRefreshJob | null | undefined): FirstRead | null {
   if (queue.length) {
     const ids = productIdsOf(unitsFromQueue(queue));
-    return ids.length ? productsRead(ids) : null;
+    return ids.length ? { kind: 'queue', op: productsRead(ids) } : null;
   }
-  return job?.status === 'running' ? pageRead(job) : null;
+  if (running(catalog)) return { kind: 'catalog', op: pageRead(catalog), job: catalog };
+  if (running(refresh)) return { kind: 'refresh', op: statusPageRead(refresh), job: refresh };
+  return null;
+}
+
+/**
+ * The page the mark read for `job`, when the job still stands where it was
+ * read and no pass came before. A page read for another job (a route
+ * restarted it as the run marked itself) is read again; after another pass,
+ * reading the page sends the writes that wait first, so no write to a product
+ * waits beside another to the same product.
+ */
+function prefetched(run: Run, kind: 'catalog' | 'refresh', job: { date_started: string; cursor: string | null } | null | undefined, passes: number): unknown {
+  const first = run.first;
+  if (passes || first?.kind !== kind || !first.job || !job) return undefined;
+  return first.job.date_started === job.date_started && first.job.cursor === job.cursor ? first.answer : undefined;
 }
 
 /** A store too slow for a pass is worth a line in the function log. */
@@ -112,7 +164,7 @@ const reportSlow = (budget: Budget) =>
 function preambleCost(connection: Connection, state: SyncState | null, markets: Market[], now: number) {
   const missing = markets.filter((market) => !market.data_source).length;
   return {
-    google: (tokenFresh(connection, now) ? 0 : 1) + (state?.quota?.date_checked ? 0 : 1) + (missing ? 1 + missing : 0),
+    google: (tokenFresh(connection, now) ? 0 : 1) + (quotaDue(state?.quota, now) ? 1 : 0) + (missing ? 1 + missing : 0),
     // A created data source is read back and stored (Ruling 8).
     swell: 2 * missing,
   };
@@ -122,7 +174,7 @@ function preambleCost(connection: Connection, state: SyncState | null, markets: 
 async function prepare(run: Run): Promise<{ token: string; markets: Market[] }> {
   const { ctx, connection, state, outbox } = run;
   const token = await accessTokenFor(ctx, connection, (patch) => outbox.add(connectionWrite(connection.id, patch)));
-  if (!state.quota?.date_checked) {
+  if (quotaDue(state.quota, run.now)) {
     state.quota = await readQuota(ctx, token, connection.merchant_id!, state.quota);
     run.quotaChanged = true;
   }
@@ -133,7 +185,6 @@ async function work(run: Run): Promise<WorkResult> {
   const { ctx, connection, state, budget, outbox } = run;
   let sent = 0;
   let failure: GoogleApiError | undefined;
-  let job = state.full_sync;
   let passes = 0;
 
   const { token, markets } = await prepare(run);
@@ -152,7 +203,9 @@ async function work(run: Run): Promise<WorkResult> {
   let items = run.queue;
   let waiting = run.waiting;
   let products: Map<string, SwellProduct> | undefined;
-  if (items.length) products = run.prefetched === undefined ? new Map() : productsOf(run.prefetched);
+  if (run.first?.kind === 'queue') products = productsOf(run.first.answer);
+  // Deleted products need none.
+  else if (items.length && !productIdsOf(unitsFromQueue(items)).length) products = new Map();
   let left = false;
   const taken: string[] = [];
   while (items.length && gate(products ? 2 : 3)) {
@@ -191,22 +244,42 @@ async function work(run: Run): Promise<WorkResult> {
   }
   const queueMore = left || items.length > 0 || waiting > 0;
 
-  // Without the page in hand, a pass reads it with the writes that wait. A
-  // page read for another job (activate restarted it as the run marked
-  // itself) is read again.
-  const samePage = job?.date_started === run.startJob?.date_started && job?.cursor === run.startJob?.cursor;
-  let page = run.queue.length || !samePage ? undefined : run.prefetched;
-  while (!failure && !queueMore && job?.status === 'running' && gate(page === undefined ? 3 : 2)) {
-    passes++;
-    const pass = await fullSyncPass(env, job, [reread], page);
-    page = undefined;
-    if (pass.answers.length) run.latest = recordOf<SyncState>(pass.answers[0], 'the sync state');
-    sent += pass.sentOps;
-    failure = pass.failure;
-    job = pass.job;
-    if (!pass.progressed) break;
+  /** A job's passes while it runs and the gate allows; each reads the state back with its writes. */
+  const passesOf = async <J extends { status: 'running' | 'done' }>(
+    start: J | null | undefined,
+    page: unknown,
+    pass: (job: J, page: unknown) => Promise<PassResult<J>>,
+  ) => {
+    let job = start;
+    while (!failure && running(job) && gate(page === undefined ? 3 : 2)) {
+      passes++;
+      const result = await pass(job, page);
+      page = undefined;
+      if (result.answers.length) run.latest = recordOf<SyncState>(result.answers[0], 'the sync state');
+      failure = result.failure;
+      job = result.job;
+      if (!result.progressed) break;
+    }
+    return job;
+  };
+
+  let catalog = state.full_sync;
+  if (!queueMore) {
+    catalog = await passesOf(catalog, prefetched(run, 'catalog', catalog, passes), async (job, page) => {
+      const pass = await fullSyncPass(env, job, [reread], page);
+      sent += pass.sentOps;
+      return pass;
+    });
   }
-  return { sent, failure, queueMore, job };
+  // The status jobs wait until the queue and the catalog sync are idle in this
+  // run, the scan for the refresh. Their Google reads have their own quota and
+  // do not pace the next run.
+  const idle = !queueMore && !running(catalog);
+  let refresh = state.status_refresh;
+  if (idle) refresh = await passesOf(refresh, prefetched(run, 'refresh', refresh, passes), (job, page) => statusRefreshPass(env, job, [reread], page));
+  let scan = state.orphan_scan;
+  if (idle && !running(refresh)) scan = await passesOf(scan, undefined, (job) => orphanScanPass(env, job, [reread]));
+  return { sent, failure, queueMore, jobs: { full_sync: catalog, status_refresh: refresh, orphan_scan: scan } };
 }
 
 /** The run's last round trip: the state, the next alarm and whatever still waits, in one batch. */
@@ -215,11 +288,24 @@ async function finish(run: Ending, result: WorkResult): Promise<CourierOutcome> 
   const { sent, failure, queueMore } = result;
   const patch: Record<string, unknown> = { running_since: null };
   if (run.quotaChanged) patch.quota = { $set: state.quota };
-  // A catalog sync started or stopped during the run (connect, disconnect) wins over the run's job.
   const stored = run.latest === undefined ? state : run.latest;
-  const ours = stored?.full_sync?.date_started === state.full_sync?.date_started;
-  const job = ours ? result.job : stored?.full_sync;
-  if (ours && result.job !== state.full_sync) patch.full_sync = { $set: result.job };
+  // A job started or stopped during the run elsewhere (connect, disconnect,
+  // the sync route) wins over the run's. A job the run started itself may
+  // still read as the one it replaced: the read can run before the write that
+  // shares its round trip.
+  const settle = <K extends JobKey>(key: K): Jobs[K] => {
+    const theirs = stored?.[key];
+    const mine = state[key];
+    const replaced = run.marked[key];
+    const ours = theirs?.date_started === mine?.date_started || (mine !== replaced && theirs?.date_started === replaced?.date_started);
+    if (!ours) return theirs;
+    if (result.jobs[key] !== mine) patch[key] = { $set: result.jobs[key] };
+    return result.jobs[key];
+  };
+  const catalog = settle('full_sync');
+  const refresh = settle('status_refresh');
+  const scan = settle('orphan_scan');
+  if (patch.status_refresh && refresh?.status === 'done') patch.summary = { $set: summaryOf(refresh) };
   const end = ctx.now();
 
   let at: number | null;
@@ -238,7 +324,7 @@ async function finish(run: Ending, result: WorkResult): Promise<CourierOutcome> 
     at = end + Math.min(NEXT_RUN_MS * 2 ** backoff, MAX_BACKOFF_MS);
     Object.assign(patch, { backoff, not_before: iso(at), last_error: failure.message });
     outcome = { next: 'later', sent };
-  } else if (queueMore || job?.status === 'running') {
+  } else if (queueMore || running(catalog) || running(refresh) || running(scan)) {
     at = end + pacedDelay(sent, state.quota?.minute_limit);
     Object.assign(patch, { backoff: 0, not_before: iso(at), last_error: null });
     outcome = { next: 'soon', sent };
@@ -251,19 +337,23 @@ async function finish(run: Ending, result: WorkResult): Promise<CourierOutcome> 
   const alarm = alarmWrite(run.alarm, at);
   if (alarm) outbox.add(alarm);
   // A refused state write fails the run; the dead-man alarm brings the next one.
+  // It takes in the start of a job that no round trip has carried yet.
   const [saved] = await outbox.send([stateWrite(state.id, patch)]);
   recordOf(saved, 'the run’s end');
   return outcome;
 }
 
 /**
- * One courier run: the queue, then the catalog sync, within a 7 s budget.
- * Reads everything in one round trip, marks the run with the first pass's
- * read in another, starts a pass only with time for its round trips at the
- * slowest measured, and ends by setting the alarm for the next run, or
- * clearing it when idle.
+ * One courier run: the queue, then the catalog sync, the status refresh and
+ * the orphan scan, within an 8 s budget. Reads everything in one round trip,
+ * marks the run with the first pass's read in another, starts a pass only
+ * with time for its round trips at the slowest measured, and ends by setting
+ * the alarm for the next run, or clearing it when idle. An hourly run also
+ * starts the status jobs that are due, and sets no dead-man alarm: the next
+ * hour is its safety net.
  */
-export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
+export async function runCourier(appCtx: AppContext, opts: { trigger?: CourierTrigger } = {}): Promise<CourierOutcome> {
+  const hourly = opts.trigger === 'hourly';
   const budget = new Budget(appCtx.now, COURIER_BUDGET_MS);
   const ctx = measured(appCtx, budget);
   const start = await readStart(ctx);
@@ -285,7 +375,11 @@ export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
   if (notBefore - now > EARLY_TOLERANCE_MS) return { next: 'early', sent: 0 };
   if (state?.running_since && now - Date.parse(state.running_since) < RUNNING_TTL_MS) return { next: 'busy', sent: 0 };
 
-  if (!start.queue.length && state?.full_sync?.status !== 'running') {
+  const jobs = jobsOf(state);
+  const due = hourly ? dueJobs(state, now) : {};
+  const starting = Object.keys(due).length > 0;
+  const hasWork = start.queue.length > 0 || Object.values(jobs).some(running) || starting || (hourly && quotaDue(state?.quota, now));
+  if (!hasWork) {
     const reset = idleReset(state);
     if (reset) outbox.add(stateWrite(state!.id, reset));
     const clear = alarmWrite(alarm, null);
@@ -296,13 +390,29 @@ export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
 
   // The preamble, the mark with the first read, a Google batch, the pass's
   // writes and the end. A run without time for them only asks to come back,
-  // after the preamble when that fits, so the next run has time to send.
+  // after the preamble when that fits, so the next run has time to send. An
+  // hourly run with jobs to start takes the lock for them all the same, when
+  // the mark, the preamble and the end fit: the next run works them.
   const preamble = preambleCost(connection, state, start.markets, now);
-  if (!budget.allows(3 + preamble.swell, 1 + preamble.google)) {
+  const passFits = budget.allows(3 + preamble.swell, 1 + preamble.google);
+  if (!passFits && !(starting && budget.allows(2 + preamble.swell, preamble.google))) {
     const setUp = (preamble.google > 0 || preamble.swell > 0) && budget.allows(1 + preamble.swell, preamble.google);
     if (!setUp) reportSlow(budget);
-    const run: Run = { ctx, budget, outbox, connection, state: state ?? ({} as SyncState), quotaChanged: false, alarm, markets: start.markets, queue: [], waiting: 0 };
-    let result: WorkResult = { sent: 0, queueMore: true, job: state?.full_sync };
+    const run: Run = {
+      ctx,
+      budget,
+      outbox,
+      connection,
+      now,
+      state: state ?? ({} as SyncState),
+      marked: jobs,
+      quotaChanged: false,
+      alarm,
+      markets: start.markets,
+      queue: [],
+      waiting: 0,
+    };
+    let result: WorkResult = { sent: 0, queueMore: start.queue.length > 0, jobs };
     if (setUp) {
       try {
         await prepare(run);
@@ -317,9 +427,10 @@ export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
   // Runs that start together all pass the busy check: the mark bumps a
   // counter atomically, and only the run that gets the next number works.
   // The mark's running_since keeps later runs busy; a loser's lands in the
-  // same moment as the winner's, which the winner's end clears.
-  const read = firstRead(start.queue, state?.full_sync);
-  const marking: BatchOp[] = [stateWrite(state?.id, { running_since: iso(now), $inc: { run_seq: 1 } }), ...(read ? [read] : [])];
+  // same moment as the winner's, which the winner's end clears. A refresh an
+  // hourly run is about to start reads its first page with the mark too.
+  const read = firstRead(start.queue, state?.full_sync, running(state?.status_refresh) ? state.status_refresh : due.status_refresh);
+  const marking: BatchOp[] = [stateWrite(state?.id, { running_since: iso(now), $inc: { run_seq: 1 } }), ...(read ? [read.op] : [])];
   const answers = await swellBatch(ctx.swell, marking);
   const current = recordOf<SyncState>(answers[0], 'the run mark');
   if (!current?.id) throw new Error('Swell did not keep the run mark');
@@ -330,25 +441,32 @@ export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
 
   // A run killed at 10 s leaves no future run; the dead-man alarm comes after
   // the mark expires and finds the next run already working (busy/early) or
-  // picks the work up. Only the winner sets it, with its next round trip; the
-  // ending's alarm write supersedes it. A store without an alarm record (none
-  // ever armed) gets none.
+  // picks the work up. Only the winner of an alarm run sets it, with its next
+  // round trip; the ending's alarm write supersedes it. A store without an
+  // alarm record (none ever armed) gets none.
   const deadManAt = now + RUNNING_TTL_MS + 5000;
-  const deadMan = alarm ? alarmWrite(alarm, deadManAt) : null;
+  const deadMan = alarm && !hourly ? alarmWrite(alarm, deadManAt) : null;
   if (deadMan) outbox.add(deadMan);
+  // The jobs due by the state the mark answered start in this run's memory and
+  // are written with its next round trip.
+  const started = hourly ? dueJobs(current, now) : {};
+  if (Object.keys(started).length) {
+    outbox.add(stateWrite(current.id, Object.fromEntries(Object.entries(started).map(([key, job]) => [key, { $set: job }]))));
+  }
   const run: Run = {
     ctx,
     budget,
     outbox,
     connection,
-    state: current,
+    now,
+    state: { ...current, ...started },
+    marked: jobsOf(current),
     quotaChanged: false,
     alarm: deadMan ? { id: alarm!.id, wake_at: iso(deadManAt) } : alarm,
     markets: start.markets,
     queue: start.queue,
     waiting: start.waiting,
-    prefetched: read ? answers[marking.length - 1] : undefined,
-    startJob: state?.full_sync,
+    first: read ? { ...read, answer: answers[1] } : undefined,
   };
 
   let result: WorkResult;
@@ -356,7 +474,7 @@ export async function runCourier(appCtx: AppContext): Promise<CourierOutcome> {
     result = await work(run);
   } catch (error) {
     if (!(error instanceof GoogleApiError)) return rearmAndThrow(run, error);
-    result = { sent: 0, failure: error, queueMore: true, job: current.full_sync };
+    result = { sent: 0, failure: error, queueMore: true, jobs: jobsOf(run.state) };
   }
   return finish(run, result);
 }

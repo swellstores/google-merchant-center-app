@@ -4,6 +4,9 @@ import { loadMarkets } from '../../../functions/lib/connection/markets';
 import { COURIER_BUDGET_MS, NEXT_RUN_MS, pacedDelay, PASS_PRODUCTS, runCourier } from '../../../functions/lib/sync/courier';
 import { MAX_ATTEMPTS, queueChange } from '../../../functions/lib/sync/queue';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
+import { newOrphanScanJob } from '../../../functions/lib/status/orphans';
+import { pendingStatus, type GoogleProductStatus } from '../../../functions/lib/status/product-status';
+import { newStatusRefreshJob, STATUS_PAGE, summaryOf } from '../../../functions/lib/status/refresh';
 import { APP_ID, fixedClock, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
@@ -95,6 +98,73 @@ function forget(swell: ReturnType<typeof createFakeSwell>['swell']) {
   swell.put.mockClear();
   swell.delete.mockClear();
 }
+
+const MINUTE = 60_000;
+const HOUR = 3_600_000;
+const DAY = 86_400_000;
+const hourly = { trigger: 'hourly' } as const;
+
+/** A refresh and an orphan scan that finished a minute ago: neither is due for a while. */
+const RECENT_JOBS = {
+  status_refresh: { $set: { ...newStatusRefreshJob(NOW - 2 * MINUTE), status: 'done', date_finished: at(NOW - MINUTE), duration_ms: MINUTE } },
+  orphan_scan: { $set: { ...newOrphanScanJob(NOW - 2 * MINUTE), status: 'done', date_finished: at(NOW - MINUTE) } },
+};
+
+/** A steady store with no status job due. */
+async function quiet(products: Record<string, any>[] = [MUG], googleOptions: FakeGoogleOptions = {}, connection: Record<string, any> = {}) {
+  const store = await steady(products, googleOptions, connection);
+  await saveState(store.swell, (await loadState(store.swell)).id, RECENT_JOBS);
+  return store;
+}
+
+const pending = pendingStatus();
+
+/** A quiet store whose products the courier sent an hour ago and marked pending: Google holds their offers. */
+async function listed(products: Record<string, any>[], googleOptions: FakeGoogleOptions = {}, connection: Record<string, any> = {}) {
+  const sent = products.map((p): Record<string, any> => ({
+    ...p,
+    $app: {
+      [APP_ID]: {
+        sync_state: 'sent',
+        input_ids: [`en~US~${p.id}`],
+        date_synced: at(NOW - HOUR),
+        status: pending.status,
+        status_label: pending.label,
+        status_hash: pending.hash,
+        status_issues: pending.issues,
+      },
+    },
+  }));
+  const store = await quiet(sent, googleOptions, connection);
+  for (const p of sent) store.google.inputs.set(`${DS}|en~US~${p.id}`, { offerId: p.id, contentLanguage: 'en', feedLabel: 'US' });
+  return store;
+}
+
+const approved: GoogleProductStatus = {
+  destinationStatuses: [{ reportingContext: 'SHOPPING_ADS', approvedCountries: ['US'] }],
+  googleExpirationDate: at(NOW + 30 * DAY),
+};
+const disapproved = (code: string): GoogleProductStatus => ({
+  destinationStatuses: [{ reportingContext: 'SHOPPING_ADS', disapprovedCountries: ['US'] }],
+  itemLevelIssues: [{ code, severity: 'DISAPPROVED', description: `${code} text`, applicableCountries: ['US'] }],
+  googleExpirationDate: at(NOW + 30 * DAY),
+});
+
+const alarmWrites = (swell: ReturnType<typeof createFakeSwell>['swell']) =>
+  batchesOf(swell)
+    .flat()
+    .filter((op) => op.url.startsWith('/alarms') && op.method !== 'get')
+    .map((op) => op.data!.wake_at);
+
+/** Google's product reads and lists, in the order the run made them, by kind. */
+const googleCalls = (google: ReturnType<typeof createFakeGoogle>) =>
+  google.requests.flatMap((r) => {
+    const [path] = r.path.split('?');
+    if (path.endsWith('/productInputs:insert')) return ['insert'];
+    if (r.method === 'GET' && /\/accounts\/\d+\/products\/[^/]+$/.test(path)) return ['status'];
+    if (r.method === 'GET' && /\/accounts\/\d+\/products$/.test(path)) return ['list'];
+    return [];
+  });
 
 describe('runCourier', () => {
   it('clears the alarm when Google is not connected', async () => {
@@ -660,6 +730,259 @@ describe('runCourier timing', () => {
     expect((await loadState(swell)).not_before).toBe(at(NOW + 2000 + NEXT_RUN_MS));
     expect((await loadAlarm(swell)).wake_at).toBe(at(NOW + 2000 + NEXT_RUN_MS));
     warn.mockRestore();
+  });
+});
+
+describe('runCourier hourly', () => {
+  it('an hourly run of an idle store makes one round trip and no writes', async () => {
+    const { ctx, swell, google } = await quiet();
+    forget(swell);
+    expect(await runCourier(ctx, hourly)).toEqual({ next: 'idle', sent: 0 });
+    expect(roundTrips(swell)).toBe(1);
+    expect(google.requests).toHaveLength(0);
+  });
+
+  it('an hourly run starts a due refresh and works it in the same run', async () => {
+    const { ctx, swell, collections } = await listed([MUG], { statuses: { 'en~US~p1': approved } });
+    const state = await loadState(swell);
+    await saveState(swell, state.id, { status_refresh: null });
+    forget(swell);
+    expect(await runCourier(ctx, hourly)).toEqual({ next: 'idle', sent: 0 });
+    expect(roundTrips(swell)).toBe(4);
+    // The mark reads the new refresh's first page; the job is written with the pass's writes.
+    const [, mark, pass, end] = batchesOf(swell).map(opsOf);
+    expect(mark).toEqual(['put /sync-states/:id', 'get /products']);
+    expect(pass).toEqual(['put /sync-states/:id', 'put /products/p1', 'get /sync-states/:id']);
+    expect(end).toEqual(['put /sync-states/:id']);
+    expect((await loadState(swell)).status_refresh).toMatchObject({ status: 'done', date_started: at(NOW), checked: 1, counters: { approved: 1 } });
+    expect(collections['/products'][0].$app[APP_ID]).toMatchObject({ status: 'approved' });
+  });
+
+  it('an hourly run sets no dead-man alarm', async () => {
+    const { ctx, swell } = await quiet([MUG], { batch: { status: 429, body: { error: { message: 'quota/request_rate_too_high' } } } });
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    expect((await runCourier(ctx, hourly)).next).toBe('later');
+    // Only the ending's: work remains.
+    expect(alarmWrites(swell)).toEqual([at(NOW + 30_000)]);
+  });
+
+  it('an alarm run never starts a job', async () => {
+    const { ctx, swell } = await steady();
+    forget(swell);
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 0 });
+    expect(roundTrips(swell)).toBe(1);
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 1 });
+    const state = await loadState(swell);
+    expect(state.status_refresh ?? null).toBeNull();
+    expect(state.orphan_scan ?? null).toBeNull();
+  });
+
+  it('an hourly run reads a quota older than a day', async () => {
+    const { ctx, swell, google } = await quiet();
+    await saveState(swell, (await loadState(swell)).id, { quota: { $set: { minute_limit: 60, daily_limit: 100, date_checked: at(NOW - 25 * HOUR) } } });
+    expect(await runCourier(ctx, hourly)).toEqual({ next: 'idle', sent: 0 });
+    expect((await loadState(swell)).quota).toEqual({ minute_limit: 300, daily_limit: 5000, date_checked: at(NOW) });
+    forget(swell);
+    await runCourier(testContext(swell, google.fetch, fixedClock(NOW + 30 * MINUTE)), hourly);
+    expect(roundTrips(swell)).toBe(1);
+    expect(google.requests.filter((r) => r.path.startsWith('/quota'))).toHaveLength(1);
+  });
+
+  it('a run with work reads a quota older than a day too', async () => {
+    const { ctx, swell, google } = await quiet();
+    await saveState(swell, (await loadState(swell)).id, { quota: { $set: { minute_limit: 60, date_checked: at(NOW - DAY) } } });
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    expect((await runCourier(ctx)).sent).toBe(1);
+    expect(google.requests.filter((r) => r.path.startsWith('/quota'))).toHaveLength(1);
+    expect((await loadState(swell)).quota).toMatchObject({ minute_limit: 300, date_checked: at(NOW) });
+  });
+
+  it('an hourly run works a stalled queue itself', async () => {
+    const { ctx, swell, google } = await quiet();
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    await setAlarm(testContext(swell, undefined, fixedClock(NOW - HOUR)), NOW - 10 * MINUTE);
+    expect(await runCourier(ctx, hourly)).toEqual({ next: 'idle', sent: 1 });
+    expect(google.inputs.size).toBe(1);
+    expect(await queueCount(swell)).toBe(0);
+    expect((await loadAlarm(swell)).wake_at).toBeNull();
+  });
+
+  it('an hourly run works a catalog sync that has no alarm', async () => {
+    const { ctx, swell, collections } = await quiet();
+    collections['/alarms'].length = 0;
+    await saveState(swell, (await loadState(swell)).id, { full_sync: { $set: { status: 'running', cursor: null, total: 1, done: 0, date_started: at(NOW) } } });
+    expect(await runCourier(ctx, hourly)).toEqual({ next: 'idle', sent: 1 });
+    expect((await loadState(swell)).full_sync).toMatchObject({ status: 'done', done: 1 });
+  });
+
+  it('an hourly run waits for the time the last run asked for, and for a run at work', async () => {
+    const { ctx, swell, google } = await steady();
+    const state = await loadState(swell);
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    await saveState(swell, state.id, { not_before: at(NOW + 10 * MINUTE) });
+    forget(swell);
+    expect(await runCourier(ctx, hourly)).toEqual({ next: 'early', sent: 0 });
+    await saveState(swell, state.id, { not_before: null, running_since: at(NOW - 5_000) });
+    forget(swell);
+    expect(await runCourier(ctx, hourly)).toEqual({ next: 'busy', sent: 0 });
+    expect(roundTrips(swell)).toBe(1);
+    expect(google.requests).toHaveLength(0);
+    expect(await queueCount(swell)).toBe(1);
+    expect((await loadState(swell)).status_refresh ?? null).toBeNull();
+  });
+
+  it('an hourly run without time for a pass still starts the due refresh, and the next run works it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = await listed(many(STATUS_PAGE), {}, { access_token: null, access_token_expires: null });
+    await saveState(store.swell, (await loadState(store.swell)).id, { status_refresh: null });
+    const first = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 });
+    expect(await runCourier(testContext(first.swell, first.fetch, first.now), hourly)).toEqual({ next: 'soon', sent: 0 });
+    // Start, the mark, the token, the end with the new job: a pass would not fit after the token.
+    expect(first.now() - NOW).toBe(3 * 1300 + 1500);
+    // The job starts when the start read came back.
+    expect((await loadState(store.swell)).status_refresh).toMatchObject({ status: 'running', cursor: null, date_started: at(NOW + 1300) });
+    const later = NOW + MINUTE;
+    const second = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 }, later);
+    expect((await runCourier(testContext(second.swell, second.fetch, second.now))).next).toBe('soon');
+    expect((await loadState(store.swell)).status_refresh).toMatchObject({ status: 'running', checked: STATUS_PAGE, date_started: at(NOW + 1300) });
+    warn.mockRestore();
+  });
+
+  it('an hourly run that starts jobs sends the queue with the products the mark read', async () => {
+    const store = await quiet([MUG], {}, { access_token: null, access_token_expires: null });
+    await saveState(store.swell, (await loadState(store.swell)).id, { status_refresh: null });
+    await enqueue(store.swell, { productId: 'p1', kind: 'full' });
+    // No time for a pass before the token; a quick token leaves time for one after it.
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500, tokenMs: 300 });
+    expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now), hourly)).toEqual({ next: 'soon', sent: 1 });
+    expect(opsOf(batchesOf(store.swell)[1])).toEqual(['put /sync-states/:id', 'get /products']);
+    expect([...store.google.inputs.keys()]).toEqual([`${DS}|en~US~p1`]);
+    expect(store.collections['/queue-items']).toEqual([]);
+  });
+});
+
+describe('runCourier status jobs', () => {
+  it('the status refresh waits for the queue and the catalog sync', async () => {
+    const products = many(PASS_PRODUCTS + 1);
+    const { ctx, swell, google } = await listed(products);
+    const state = await loadState(swell);
+    await saveState(swell, state.id, {
+      full_sync: { $set: { status: 'running', cursor: null, total: 0, done: 0, date_started: at(NOW) } },
+      status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) },
+    });
+    await enqueue(swell, { productId: 'p00', kind: 'full' });
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 1 + products.length });
+    const calls = googleCalls(google);
+    expect(calls.lastIndexOf('insert')).toBeLessThan(calls.indexOf('status'));
+    expect(calls.filter((call) => call === 'status')).toHaveLength(products.length);
+    expect((await loadState(swell)).status_refresh).toMatchObject({ status: 'done', checked: products.length });
+  });
+
+  it('the status refresh waits for a queue the run left', async () => {
+    // Google lost the offer of a light update: the unit is kept for the next run.
+    const products = [{ ...MUG, $app: { [APP_ID]: { input_ids: ['en~US~p1'] } } }];
+    const { ctx, swell, google } = await quiet(products);
+    await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) } });
+    await enqueue(swell, { productId: 'p1', kind: 'light' });
+    expect((await runCourier(ctx)).next).toBe('soon');
+    expect(googleCalls(google)).not.toContain('status');
+    expect((await loadState(swell)).status_refresh).toMatchObject({ status: 'running', cursor: null, checked: 0 });
+  });
+
+  it('the status refresh reads its own page after the queue, with the writes that wait', async () => {
+    const { ctx, swell } = await listed([MUG]);
+    await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) } });
+    await enqueue(swell, { productId: 'p1', kind: 'full' });
+    forget(swell);
+    await runCourier(ctx);
+    const batches = batchesOf(swell);
+    const read = batches.findIndex((batch) => batch.some((op) => op.method === 'get' && op.url === '/products' && !(op.data as any).expand));
+    expect(opsOf(batches[read])).toEqual(['delete /queue-items/:id', 'get /products']);
+    expect((await loadState(swell)).status_refresh).toMatchObject({ status: 'done', checked: 1 });
+  });
+
+  it('a refresh restarted during the run wins', async () => {
+    const { swell, google } = await listed([MUG], { statuses: { 'en~US~p1': approved } });
+    await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) } });
+    const restarted = newStatusRefreshJob(NOW);
+    const restarting = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/batch/products/v1')) await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: restarted } });
+      return google.fetch(input, init);
+    }) as typeof fetch;
+    expect(await runCourier(testContext(swell, restarting))).toEqual({ next: 'soon', sent: 0 });
+    const state = await loadState(swell);
+    expect(state.status_refresh).toEqual(restarted);
+    expect(state.summary ?? null).toBeNull();
+  });
+
+  it('a refresh the run started survives a read that came back before the start was written', async () => {
+    const { ctx, swell, collections } = await listed([MUG]);
+    await saveState(swell, (await loadState(swell)).id, { status_refresh: null });
+    // The platform runs a batch's entries side by side: the state read may miss the job written beside it.
+    const post = swell.post.getMockImplementation()!;
+    swell.post.mockImplementation(async (url: string, data: any) => {
+      const starts = url === '/:batch' && data.some((op: any) => op.method === 'put' && op.url.startsWith('/sync-states/') && op.data?.status_refresh);
+      const before = structuredClone(collections['/sync-states'][0]);
+      const answers = await post(url, data);
+      if (!starts) return answers;
+      return answers.map((answer: unknown, i: number) => (data[i].method === 'get' && data[i].url.startsWith('/sync-states/') ? before : answer));
+    });
+    expect(await runCourier(ctx, hourly)).toEqual({ next: 'idle', sent: 0 });
+    const state = await loadState(swell);
+    expect(state.status_refresh).toMatchObject({ status: 'done', checked: 1, date_started: at(NOW) });
+    expect(state.summary).toMatchObject({ date_refreshed: at(NOW) });
+  });
+
+  it('the summary lands when the refresh finishes', async () => {
+    const products = [MUG, { ...MUG, id: 'p2', slug: 'p2' }];
+    const { ctx, swell } = await listed(products, { statuses: { 'en~US~p1': approved, 'en~US~p2': disapproved('image_too_small') } });
+    await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) } });
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 0 });
+    const state = await loadState(swell);
+    expect(state.status_refresh).toMatchObject({ status: 'done', checked: 2, date_finished: at(NOW) });
+    expect(state.summary).toEqual(summaryOf(state.status_refresh!));
+    expect(state.summary).toMatchObject({
+      counters: { approved: 1, disapproved: 1 },
+      top_issues: [expect.objectContaining({ code: 'image_too_small', products: 1 })],
+      date_refreshed: at(NOW),
+    });
+  });
+
+  it('the orphan scan comes after the status refresh', async () => {
+    const stray = { dataSource: DS, offerId: 'gone', contentLanguage: 'en', feedLabel: 'US' };
+    const { ctx, swell, google, collections } = await listed([MUG], { strays: [stray] });
+    await saveState(swell, (await loadState(swell)).id, { status_refresh: null, orphan_scan: null });
+    expect(await runCourier(ctx, hourly)).toEqual({ next: 'idle', sent: 0 });
+    expect(googleCalls(google)).toEqual(['status', 'list']);
+    const state = await loadState(swell);
+    expect(state.status_refresh).toMatchObject({ status: 'done' });
+    expect(state.orphan_scan).toMatchObject({ status: 'done', found: 1, date_started: at(NOW) });
+    expect(collections['/queue-items']).toEqual([expect.objectContaining({ product_id: 'gone', kind: 'delete', input_ids: ['en~US~gone'] })]);
+  });
+
+  it('status checks do not pace the next run', async () => {
+    const store = await listed(many(STATUS_PAGE + 1));
+    const state = await loadState(store.swell);
+    await saveState(store.swell, state.id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) }, quota: { $set: { minute_limit: 60, date_checked: at(NOW) } } });
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 });
+    expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now))).toEqual({ next: 'soon', sent: 0 });
+    // 50 status reads at 60 inserts a minute would wait 50 s.
+    const end = NOW + 3 * 1300 + 1500;
+    expect((await loadAlarm(store.swell)).wake_at).toBe(at(end + NEXT_RUN_MS));
+  });
+
+  it('an hourly refresh pass ends within 8 s at 1.3 s per Swell round trip and 1.5 s per Google call', async () => {
+    const store = await listed(many(STATUS_PAGE + 1));
+    await saveState(store.swell, (await loadState(store.swell)).id, { status_refresh: null });
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 });
+    expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now), hourly)).toEqual({ next: 'soon', sent: 0 });
+    // Start, the mark with the first page, Google, the writes with the new job, the end.
+    expect(slow.now() - NOW).toBe(4 * 1300 + 1500);
+    expect(slow.now() - NOW).toBeLessThanOrEqual(COURIER_BUDGET_MS);
+    expect(store.google.batches()).toBe(1);
+    expect((await loadState(store.swell)).status_refresh).toMatchObject({ status: 'running', checked: STATUS_PAGE, date_started: at(NOW + 1300) });
+    expect(Math.max(...batchesOf(store.swell).map((batch) => batch.length))).toBeLessThanOrEqual(10);
   });
 });
 

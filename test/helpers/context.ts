@@ -19,13 +19,16 @@ export function testContext(swell: SwellClient, fetchFn: typeof fetch = unexpect
   return { swell, appId: APP_ID, storeUrl: 'https://test-store.swell.store', fetch: fetchFn, now };
 }
 
+const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
 /**
- * Swell and Google that take the given time per round trip, on a clock that
- * moves only then: a run's fake duration is its round trips. A `/:batch`
- * costs a round trip per 10 operations (the server runs 10 at a time), and
- * calls made at the same time overlap, as concurrent requests do.
+ * Swell and Google that take the given time per round trip (a token call
+ * `tokenMs`, when given), on a clock that moves only then: a run's fake
+ * duration is its round trips. A `/:batch` costs a round trip per 10
+ * operations (the server runs 10 at a time), and calls made at the same time
+ * overlap, as concurrent requests do.
  */
-export function slowServices(swell: SwellClient, fetchFn: typeof fetch, latency: { swellMs: number; googleMs: number }, start = NOW) {
+export function slowServices(swell: SwellClient, fetchFn: typeof fetch, latency: { swellMs: number; googleMs: number; tokenMs?: number }, start = NOW) {
   let t = start;
   const after =
     <A extends unknown[], R>(ms: number, call: (...args: A) => Promise<R>) =>
@@ -46,6 +49,9 @@ export function slowServices(swell: SwellClient, fetchFn: typeof fetch, latency:
       put: after(latency.swellMs, (url: string, data: object) => swell.put(url, data)),
       delete: after(latency.swellMs, (url: string, data?: object) => swell.delete(url, data)),
     } satisfies SwellClient,
-    fetch: after(latency.googleMs, (input: RequestInfo | URL, init?: RequestInit) => fetchFn(input, init)) as typeof fetch,
+    fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+      const ms = latency.tokenMs !== undefined && String(input) === TOKEN_URL ? latency.tokenMs : latency.googleMs;
+      return after(ms, (i: RequestInfo | URL, n?: RequestInit) => fetchFn(i, n))(input, init);
+    }) as typeof fetch,
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { quotaFromGroups, readQuota } from '../../../functions/lib/sync/quota';
+import { QUOTA_TTL_MS, quotaDue, quotaFromGroups, readQuota } from '../../../functions/lib/sync/quota';
 import { NOW, testContext } from '../../helpers/context';
 import { createFakeGoogle, DEFAULT_QUOTA } from '../../helpers/fake-google';
 import { createFakeSwell } from '../../helpers/fake-swell';
@@ -29,5 +29,14 @@ describe('readQuota', () => {
   it('throws when Google refuses the key', async () => {
     const google = createFakeGoogle({ quotaError: { status: 401, body: { error: { message: 'invalid credentials' } } } });
     await expect(readQuota(testContext(createFakeSwell().swell, google.fetch), 'tok', '123')).rejects.toMatchObject({ kind: 'auth' });
+  });
+});
+
+describe('quotaDue', () => {
+  it('asks for limits never read, and again a day after they were', () => {
+    expect(quotaDue(null, NOW)).toBe(true);
+    expect(quotaDue({ minute_limit: 300 }, NOW)).toBe(true);
+    expect(quotaDue({ date_checked: at(NOW - QUOTA_TTL_MS) }, NOW)).toBe(true);
+    expect(quotaDue({ date_checked: at(NOW - QUOTA_TTL_MS + 1) }, NOW)).toBe(false);
   });
 });

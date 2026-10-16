@@ -1,11 +1,11 @@
 import { contextFrom } from './lib/context';
-import { runHourly } from './lib/sync/hourly';
+import { runCourier } from './lib/sync/courier';
 
 export const config: SwellConfig = {
-  description: 'Refresh the Merchant API quota and wake a stalled courier',
+  description: 'Start due status checks and keep the courier going',
   cron: { schedule: '0 * * * *' },
 };
 
 export default async function (req: SwellRequest) {
-  await runHourly(contextFrom(req));
+  await runCourier(contextFrom(req), { trigger: 'hourly' });
 }

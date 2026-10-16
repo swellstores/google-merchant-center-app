@@ -40,3 +40,7 @@ export async function readQuota(ctx: AppContext, token: string, accountId: strin
   }
   return { ...previous, ...limits, date_checked: iso(ctx.now()) };
 }
+
+/** Limits never read, or read a day ago or more. */
+export const quotaDue = (quota: QuotaInfo | null | undefined, now: number): boolean =>
+  !quota?.date_checked || now - Date.parse(quota.date_checked) >= QUOTA_TTL_MS;
