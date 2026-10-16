@@ -154,6 +154,9 @@ export async function statusRefreshPass(
   reads: BatchOp[] = [],
   page?: unknown,
 ): Promise<PassResult<StatusRefreshJob>> {
+  if (reads.length >= SWELL_WAVE) throw new Error('A pass needs room for its writes in one round trip');
+  // Reading the page sends the waiting writes; a page in hand leaves them to share the round trip.
+  if (SWELL_WAVE - reads.length - (page === undefined ? 0 : env.outbox.size) <= 0) return { job, sentOps: 0, progressed: false, answers: [] };
   const answer = page === undefined ? (await env.outbox.send([statusPageRead(job)]))[0] : page;
   const products = listOf<SwellProduct>(answer, 'the products to check');
   const appId = env.ctx.appId;

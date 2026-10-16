@@ -112,6 +112,26 @@ describe('orphan scan pass', () => {
     expect(roundTrips(swell)).toBe(0);
   });
 
+  it('a pass with ten reads is refused', async () => {
+    const { env, google } = setup([], { strays: [stray(1)] });
+    await expect(orphanScanPass(env, newOrphanScanJob(NOW), Array.from({ length: 10 }, () => stateById('s1')))).rejects.toThrow(
+      'A pass needs room for its writes in one round trip',
+    );
+    expect(google.requests).toHaveLength(0);
+  });
+
+  it('the product read flushes waiting writes and carries no fields mask', async () => {
+    const { env, swell } = setup([product(1, [offerOf(1, 0)])], { strays: [stray(1, 0), stray(1, 1)] });
+    env.outbox.add({ method: 'put', url: '/queue-items/q1', data: { attempts: 1 } });
+    swell.post.mockClear();
+    await orphanScanPass(env, newOrphanScanJob(NOW));
+    const [first, second] = batchesOf(swell);
+    expect(first.map((op) => [op.method, op.url])).toEqual([['put', '/queue-items/q1'], ['get', '/products']]);
+    expect(first[1].data).toEqual({ where: { id: { $in: [idOf(1)] } }, limit: 1 });
+    expect(first[1].data).not.toHaveProperty('fields');
+    expect(second.map((op) => [op.method, op.url])).toEqual([['post', '/queue-items']]);
+  });
+
   it('leaves the job without a round trip when there is no time for the page', async () => {
     const { env, swell, google } = setup([], { strays: [stray(1)] });
     env.budget = new Budget(fixedClock(), 1000);

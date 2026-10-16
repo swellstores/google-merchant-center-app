@@ -55,6 +55,7 @@ const productsRead = (ids: string[]): BatchOp => ({ method: 'get', url: '/produc
  * of them past the stop is handled again by the next pass.
  */
 export async function orphanScanPass(env: DeliveryEnv, job: OrphanScanJob, reads: BatchOp[] = []): Promise<PassResult<OrphanScanJob>> {
+  if (reads.length >= SWELL_WAVE) throw new Error('A pass needs room for its writes in one round trip');
   const unchanged = { job, sentOps: 0, progressed: false, answers: [] };
   // A page is worth reading with time for its answers to be written and the run to end.
   if (!env.budget.allows(2)) return unchanged;

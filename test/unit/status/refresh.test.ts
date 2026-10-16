@@ -333,6 +333,26 @@ describe('status refresh pass', () => {
     expect(batchesOf(fake.swell).map((batch) => batch.map((op) => op.method))).toEqual([['get'], ['put', 'put', 'put', 'get']]);
   });
 
+  it('a pass with ten reads is refused', async () => {
+    const { env } = setup([product(1)]);
+    await expect(statusRefreshPass(env, newStatusRefreshJob(NOW), Array.from({ length: 10 }, () => stateById('s1')))).rejects.toThrow(
+      'A pass needs room for its writes in one round trip',
+    );
+  });
+
+  it('a pass with no room for writes does not call Google', async () => {
+    const { env, swell, google } = setup([product(1)], { statuses: { [offerOf(1)]: approved() } });
+    const job = newStatusRefreshJob(NOW);
+    const [page] = await swellBatch(swell, [statusPageRead(job)]);
+    swell.post.mockClear();
+    env.outbox.add(...Array.from({ length: 9 }, (_, i) => ({ method: 'put' as const, url: `/queue-items/q${i}`, data: { attempts: 1 } })));
+    const pass = await statusRefreshPass(env, job, [stateById('s1')], page);
+    expect(pass).toEqual({ job, sentOps: 0, progressed: false, answers: [] });
+    expect(google.requests).toHaveLength(0);
+    expect(swell.post).not.toHaveBeenCalled();
+    expect(env.outbox.size).toBe(9);
+  });
+
   it('leaves a page it has no time to check, without a round trip', async () => {
     const { env, swell, google } = setup([product(1)]);
     env.budget = new Budget(fixedClock(), 1000);
