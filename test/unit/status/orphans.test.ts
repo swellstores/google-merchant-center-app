@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Market } from '../../../functions/lib/connection/markets';
 import { newOrphanScanJob, ORPHAN_PAGE, ORPHAN_WRITES, orphanScanPass, type OrphanScanJob } from '../../../functions/lib/status/orphans';
 import { Outbox } from '../../../functions/lib/swell-batch';
@@ -38,6 +38,14 @@ function setup(products: Record<string, any>[], options: FakeGoogleOptions = {})
 
 type Fake = ReturnType<typeof setup>;
 const posts = (swell: Fake['swell']) => batchesOf(swell).flat().filter((op) => op.method === 'post');
+
+/** Google answers the products list with `status`. */
+const refusing = (status: number) =>
+  (async () => new Response(JSON.stringify({ error: { code: status, message: 'Invalid page token' } }), { status })) as unknown as typeof fetch;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('orphan scan pass', () => {
   it('queues a delete for offers whose product is gone', async () => {
@@ -109,6 +117,32 @@ describe('orphan scan pass', () => {
     expect(pass.job).toBe(job);
     expect(pass).toMatchObject({ sentOps: 0, progressed: false, answers: [] });
     expect(pass.failure).toBeDefined();
+    expect(roundTrips(swell)).toBe(0);
+  });
+
+  it('a refused page token restarts the scan without a failure', async () => {
+    for (const status of [400, 404, 409]) {
+      const { env, swell } = setup([]);
+      env.ctx = { ...env.ctx, fetch: refusing(status) };
+      const job: OrphanScanJob = { ...newOrphanScanJob(NOW), page_token: '500', skip: 4, found: 3 };
+      const pass = await orphanScanPass(env, job, [stateById('s1')]);
+      expect(pass.failure).toBeUndefined();
+      expect(pass).toMatchObject({ sentOps: 0, progressed: true });
+      expect(pass.job).toEqual({ ...job, page_token: null, skip: 0 });
+      expect(roundTrips(swell)).toBe(0);
+    }
+  });
+
+  it('a refused first page ends the scan', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { env, swell } = setup([]);
+    env.ctx = { ...env.ctx, fetch: refusing(400) };
+    const job: OrphanScanJob = { ...newOrphanScanJob(NOW - 60_000), skip: 2, found: 1 };
+    const pass = await orphanScanPass(env, job, [stateById('s1')]);
+    expect(pass.failure).toBeUndefined();
+    expect(pass).toMatchObject({ sentOps: 0, progressed: true });
+    expect(pass.job).toEqual({ ...job, status: 'done', date_finished: iso(NOW) });
+    expect(warn).toHaveBeenCalledTimes(1);
     expect(roundTrips(swell)).toBe(0);
   });
 

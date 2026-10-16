@@ -4,6 +4,8 @@ import { loadMarkets } from '../../../functions/lib/connection/markets';
 import { loadConnection, saveConnection } from '../../../functions/lib/connection/store';
 import { AppError, type AppContext } from '../../../functions/lib/context';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
+import { newOrphanScanJob } from '../../../functions/lib/status/orphans';
+import { newStatusRefreshJob, type StatusSummary } from '../../../functions/lib/status/refresh';
 import { fixedClock, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
@@ -44,6 +46,21 @@ function forget(swell: ReturnType<typeof createFakeSwell>['swell']) {
 async function connect(ctx: AppContext, market = MARKET, input = CHECK()) {
   const checked = await check(ctx, { ...input, ...market });
   return checked.report.ok ? activate(ctx, market) : null;
+}
+
+const SUMMARY: StatusSummary = {
+  counters: { approved: 3, partial: 0, pending: 1, disapproved: 1, not_sent: 0, excluded: 0 },
+  top_issues: [],
+  date_refreshed: at(NOW),
+};
+
+/** A store that refreshed its statuses and is half way through an orphan scan. */
+async function withStatusJobs(swell: ReturnType<typeof createFakeSwell>['swell']) {
+  await saveState(swell, (await loadState(swell)).id, {
+    status_refresh: { $set: { ...newStatusRefreshJob(NOW), cursor: 'p1', checked: 1 } },
+    orphan_scan: { $set: { ...newOrphanScanJob(NOW), page_token: '250', skip: 3 } },
+    summary: { $set: SUMMARY },
+  });
 }
 
 describe('connectionStatus', () => {
@@ -337,6 +354,19 @@ describe('activate', () => {
     expect((await loadState(swell)).full_sync).toMatchObject({ cursor: null, date_started: at(NOW + 60_000) });
   });
 
+  it('a new merchant resets the orphan scan', async () => {
+    const { ctx, swell } = setup();
+    await connect(ctx);
+    await withStatusJobs(swell);
+    await connect(later(ctx));
+    expect(await loadState(swell)).toMatchObject({ status_refresh: { cursor: 'p1' }, orphan_scan: { page_token: '250', skip: 3 } });
+    await connect(later(ctx, 2), MARKET, { ...CHECK(), merchant_id: '456' });
+    const state = await loadState(swell);
+    expect(state.orphan_scan).toBeNull();
+    expect(state.status_refresh).toBeNull();
+    expect(state.summary).toEqual(SUMMARY);
+  });
+
   it("drops another account's data source after a failed attempt", async () => {
     const fake = createFakeSwell({
       products: [{ id: 'p1' }],
@@ -455,6 +485,17 @@ describe('disconnect', () => {
     await connect(ctx);
     refuse((method, url) => (method === 'put' && url.startsWith('/connections/') ? 'Permission denied' : null));
     await expect(disconnect(ctx, false)).rejects.toThrow('Permission denied');
+  });
+
+  it('disconnect clears the status jobs and keeps the summary', async () => {
+    const { ctx, swell } = setup();
+    await connect(ctx);
+    await withStatusJobs(swell);
+    await disconnect(ctx, false);
+    const state = await loadState(swell);
+    expect(state.status_refresh).toBeNull();
+    expect(state.orphan_scan).toBeNull();
+    expect(state.summary).toEqual(SUMMARY);
   });
 
   it('leaves Google alone when asked to keep the products', async () => {

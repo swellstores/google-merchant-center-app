@@ -142,7 +142,9 @@ async function inGoogle<T>(what: string, call: () => Promise<T>): Promise<T> {
 /**
  * Creates or replaces the market of a connected store and starts sending the
  * catalog unless nothing it depends on changed: a new market, a catalog sync
- * that never ran or is older than the connection. Otherwise it only wakes the
+ * that never ran or is older than the connection. A connection newer than the
+ * catalog sync, maybe to another account, also drops the status jobs: their
+ * cursor and page token are the old connection's. Otherwise it only wakes the
  * courier for work that waits. Google comes first (the market's data source,
  * the quota, the old country's data source), then one batch writes it all:
  * a refusal leaves the store as it was.
@@ -172,7 +174,8 @@ export async function activate(ctx: AppContext, input: ActivateInput): Promise<S
   const previous = sameMarket(markets, next);
   const marketChanged = !previous || previous.currency !== next.currency || previous.link_template !== next.link_template;
   const job = state?.full_sync;
-  const restart = marketChanged || !job || Date.parse(job.date_started) < Date.parse(connection.date_connected ?? '');
+  const reconnected = !job || Date.parse(job.date_started) < Date.parse(connection.date_connected ?? '');
+  const restart = marketChanged || reconnected;
 
   const writes: BatchOp[] = [];
   const token = await inGoogle('accept the key', () => accessTokenFor(ctx, connection, (patch) => writes.push(connectionWrite(connection.id, patch))));
@@ -184,7 +187,11 @@ export async function activate(ctx: AppContext, input: ActivateInput): Promise<S
   writes.push(...(await inGoogle('remove the products of the old country', () => replaceMarket(ctx, token, accountId, markets, next, dataSource))));
   const marketAt = writes.length - 1;
   const now = ctx.now();
-  const statePatch = { ...(restart ? { full_sync: { $set: newFullSyncJob(now) } } : {}), ...(quota ? { quota: { $set: quota } } : {}) };
+  const statePatch = {
+    ...(restart ? { full_sync: { $set: newFullSyncJob(now) } } : {}),
+    ...(reconnected && (state?.status_refresh || state?.orphan_scan) ? { status_refresh: null, orphan_scan: null } : {}),
+    ...(quota ? { quota: { $set: quota } } : {}),
+  };
   if (Object.keys(statePatch).length) writes.push(stateWrite(state?.id, statePatch));
   const wake = restart || queued || job?.status === 'running' ? alarmWrite(alarm, now) : null;
   if (wake) writes.push(wake);
@@ -239,7 +246,10 @@ export async function disconnect(appCtx: AppContext, removeProducts: boolean): P
       access_token_expires: null,
       last_error: lastError,
     }),
-    ...(state ? [stateWrite(state.id, { full_sync: null, running_since: null, backoff: 0, last_error: null, not_before: null })] : []),
+    // The summary stays: the statuses it counts stay on the products.
+    ...(state
+      ? [stateWrite(state.id, { full_sync: null, status_refresh: null, orphan_scan: null, running_since: null, backoff: 0, last_error: null, not_before: null })]
+      : []),
     ...(clear ? [clear] : []),
     ...markets.filter((market) => market.data_source).map((market): BatchOp => ({ method: 'put', url: `/markets/${market.id}`, data: { data_source: null } })),
   ];

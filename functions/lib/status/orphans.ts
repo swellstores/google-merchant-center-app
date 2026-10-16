@@ -1,4 +1,4 @@
-import { GoogleApiError, googleCall } from '../google/http';
+import { GoogleApiError, googleCall, type GoogleErrorKind } from '../google/http';
 import { listProducts, productInputId } from '../google/merchant';
 import type { GoogleFields, SwellProduct } from '../mapping/types';
 import { listOf, SWELL_WAVE, type BatchOp } from '../swell-batch';
@@ -42,6 +42,16 @@ export function newOrphanScanJob(now: number): OrphanScanJob {
   return { status: 'running', page_token: null, skip: 0, found: 0, date_started: iso(now), date_finished: null };
 }
 
+/** How Google refuses a page token from another account, or one that expired while the scan waited. */
+const REFUSALS: GoogleErrorKind[] = ['data', 'not_found', 'conflict'];
+
+/** A refused page starts the scan over; a refused first page ends it, since starting over would meet the same answer. */
+function afterRefusal(env: DeliveryEnv, job: OrphanScanJob, error: GoogleApiError): PassResult<OrphanScanJob> {
+  if (job.page_token) return { job: { ...job, page_token: null, skip: 0 }, sentOps: 0, progressed: true, answers: [] };
+  console.warn(`Orphan scan: Google refused the first page of products, the scan ends: ${error.message}`);
+  return { job: { ...job, status: 'done', date_finished: iso(env.ctx.now()) }, sentOps: 0, progressed: true, answers: [] };
+}
+
 /** The products whole: a `fields` mask can drop `$app`, whose keys depend on the credentials. */
 const productsRead = (ids: string[]): BatchOp => ({ method: 'get', url: '/products', data: { where: { id: { $in: ids } }, limit: ids.length } });
 
@@ -65,6 +75,7 @@ export async function orphanScanPass(env: DeliveryEnv, job: OrphanScanJob, reads
     page = await googleCall(env.ctx.fetch, env.token, listProducts(env.accountId, ORPHAN_PAGE, job.page_token));
   } catch (error) {
     if (!(error instanceof GoogleApiError)) throw error;
+    if (REFUSALS.includes(error.kind)) return afterRefusal(env, job, error);
     return { ...unchanged, failure: error };
   }
 
