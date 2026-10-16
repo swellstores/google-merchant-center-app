@@ -2,7 +2,7 @@ import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
 import { dashboardModel, POLL_MS, type DashboardView } from './lib/dashboard';
-import { Button, Card, ExternalLink, Modal, Notice, Progress, Root, Stat } from './lib/ui';
+import { Button, Card, ExternalLink, Modal, Notice, Pill, Progress, Root, Stat } from './lib/ui';
 
 export const config = { description: 'Sync progress and product statuses in Google Merchant Center' };
 
@@ -18,8 +18,10 @@ export default function SyncDashboard(props: ComponentProps) {
   const [now, setNow] = useState(() => Date.now());
   const fetchRef = useRef(props.fetch);
   fetchRef.current = props.fetch;
+  const mounted = useRef(true);
 
   useEffect(() => {
+    mounted.current = true;
     let alive = true;
     let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -48,6 +50,7 @@ export default function SyncDashboard(props: ComponentProps) {
     document.addEventListener('visibilitychange', sync);
     return () => {
       alive = false;
+      mounted.current = false;
       stop();
       document.removeEventListener('visibilitychange', sync);
     };
@@ -58,11 +61,12 @@ export default function SyncDashboard(props: ComponentProps) {
     setError(null);
     callRoute<DashboardView>(props.fetch, 'sync', { op })
       .then((next) => {
+        if (!mounted.current) return;
         setView(next);
         setNow(Date.now());
       })
-      .catch((e) => setError(messageOf(e)))
-      .finally(() => setBusy(null));
+      .catch((e) => mounted.current && setError(messageOf(e)))
+      .finally(() => mounted.current && setBusy(null));
   }
 
   function confirmSyncAll() {
@@ -105,6 +109,7 @@ export default function SyncDashboard(props: ComponentProps) {
           ))}
         </div>
         {model.refreshedText && <span class="gmc-muted">{model.refreshedText}</span>}
+        {model.queueText && <span class="gmc-muted">{model.queueText}</span>}
         {model.progress.map((line) => (
           <Progress key={line.label} {...line} />
         ))}
@@ -124,11 +129,11 @@ export default function SyncDashboard(props: ComponentProps) {
           <ul class="gmc-list">
             {model.issues.map((issue) => (
               <li key={issue.code}>
-                <strong>{issue.description}</strong>
-                <div class="gmc-muted">
-                  {issue.products} {issue.products === 1 ? 'product' : 'products'}
-                  {issue.samples.length > 0 && `: ${issue.samples.slice(0, 3).map((sample) => sample.name).join(', ')}`}
+                <div class="gmc-actions">
+                  <Pill tone={issue.severity.tone}>{issue.severity.label}</Pill>
+                  <strong>{issue.description}</strong>
                 </div>
+                <div class="gmc-muted">{issue.sampleText}</div>
                 {issue.documentation && <ExternalLink href={issue.documentation}>Google help</ExternalLink>}
               </li>
             ))}

@@ -47,7 +47,6 @@ describe('dashboardModel', () => {
     expect(model.progress).toEqual([
       { label: 'Sending the catalog', done: 40, total: 120 },
       { label: 'Checking statuses', done: 9, total: null },
-      { label: 'Waiting to send', done: 7, total: null },
     ]);
   });
 
@@ -81,10 +80,40 @@ describe('dashboardModel', () => {
     expect(model.canSyncAll).toBe(true);
   });
 
+  it('the queue is a text line with its count', () => {
+    expect(dashboardModel(view({ queue: 7 }), NOW).queueText).toBe('7 products waiting to send');
+    expect(dashboardModel(view({ queue: 1 }), NOW).queueText).toBe('1 product waiting to send');
+    expect(dashboardModel(view({ queue: 0 }), NOW).queueText).toBeNull();
+    expect(dashboardModel(view({ queue: 7 }), NOW).progress).toEqual([]);
+  });
+
+  const issue = (severity: 'disapproved' | 'demoted' | 'info', products = 3, names: string[] = ['A']) => ({
+    code: severity,
+    severity,
+    description: 'Bad',
+    products,
+    samples: names.map((name, i) => ({ id: String(i), name })),
+  });
+  const issuesOf = (...issues: ReturnType<typeof issue>[]) =>
+    dashboardModel(view({ summary: { ...summary('2026-10-16T11:59:30Z'), top_issues: issues } }), NOW).issues;
+
+  it('issues carry their severity label and tone', () => {
+    expect(issuesOf(issue('disapproved'), issue('demoted'), issue('info')).map((i) => i.severity)).toEqual([
+      { tone: 'bad', label: 'Disapproved' },
+      { tone: 'info', label: 'Limited' },
+      { tone: 'neutral', label: 'Info' },
+    ]);
+  });
+
+  it('sample text names up to three products', () => {
+    expect(issuesOf(issue('info', 9, ['A', 'B', 'C', 'D']))[0].sampleText).toBe('9 products: A, B, C');
+    expect(issuesOf(issue('info', 1, ['A']))[0].sampleText).toBe('1 product: A');
+    expect(issuesOf(issue('info', 2, []))[0].sampleText).toBe('2 products');
+  });
+
   it('passes the top issues through', () => {
-    const issue = { code: 'c', severity: 'disapproved' as const, description: 'Bad', products: 3, samples: [{ id: '1', name: 'A' }] };
-    const model = dashboardModel(view({ summary: { ...summary('2026-10-16T11:59:30Z'), top_issues: [issue] } }), NOW);
-    expect(model.issues).toEqual([{ code: 'c', description: 'Bad', products: 3, samples: [{ id: '1', name: 'A' }] }]);
+    const model = dashboardModel(view({ summary: { ...summary('2026-10-16T11:59:30Z'), top_issues: [{ ...issue('disapproved'), documentation: 'https://g.co/x' }] } }), NOW);
+    expect(model.issues[0]).toMatchObject({ code: 'disapproved', description: 'Bad', documentation: 'https://g.co/x' });
     expect(model.refreshedText).toBe('Statuses checked just now');
   });
 });

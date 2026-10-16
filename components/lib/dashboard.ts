@@ -36,7 +36,9 @@ export interface DashboardModel {
   banner: { tone: Tone; text: string } | null;
   stats: { key: keyof StatusCounters; label: string; value: number | null; tone: Tone }[];
   progress: { label: string; done: number; total: number | null }[];
-  issues: { code: string; description: string; documentation?: string; products: number; samples: { id: string; name: string }[] }[];
+  /** The courier's backlog is a count, not progress */
+  queueText: string | null;
+  issues: { code: string; description: string; documentation?: string; severity: { tone: Tone; label: string }; sampleText: string }[];
   refreshedText: string | null;
   canSyncAll: boolean;
   canRefresh: boolean;
@@ -50,6 +52,14 @@ const STATS: { key: keyof StatusCounters; label: string; tone: Tone }[] = [
   { key: 'not_sent', label: 'Not sent', tone: 'neutral' },
   { key: 'excluded', label: 'Hidden', tone: 'neutral' },
 ];
+
+const SEVERITIES: Record<IssueTally['severity'], { tone: Tone; label: string }> = {
+  disapproved: { tone: 'bad', label: 'Disapproved' },
+  demoted: { tone: 'info', label: 'Limited' },
+  info: { tone: 'neutral', label: 'Info' },
+};
+
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 function ago(since: number, now: number): string {
   const minutes = Math.max(0, Math.floor((now - since) / 60_000));
@@ -77,17 +87,17 @@ export function dashboardModel(view: DashboardView, now: number): DashboardModel
   const progress: DashboardModel['progress'] = [];
   if (view.full_sync?.status === 'running') progress.push({ label: 'Sending the catalog', done: view.full_sync.done, total: view.full_sync.total });
   if (view.refresh?.status === 'running') progress.push({ label: 'Checking statuses', done: view.refresh.checked, total: null });
-  if (view.queue > 0) progress.push({ label: 'Waiting to send', done: view.queue, total: null });
   return {
     banner: bannerOf(view),
     stats: STATS.map((stat) => ({ ...stat, value: counters ? counters[stat.key] : null })),
     progress,
-    issues: (view.summary?.top_issues ?? []).map(({ code, description, documentation, products, samples }) => ({
+    queueText: view.queue > 0 ? `${count(view.queue, 'product')} waiting to send` : null,
+    issues: (view.summary?.top_issues ?? []).map(({ code, description, documentation, severity, products, samples }) => ({
       code,
       description,
       ...(documentation ? { documentation } : {}),
-      products,
-      samples,
+      severity: SEVERITIES[severity],
+      sampleText: `${count(products, 'product')}${samples.length > 0 ? `: ${samples.slice(0, 3).map((sample) => sample.name).join(', ')}` : ''}`,
     })),
     refreshedText: view.summary ? `Statuses checked ${ago(Date.parse(view.summary.date_refreshed), now)}` : 'Statuses are checked within the hour',
     canSyncAll: connected && view.full_sync?.status !== 'running',
