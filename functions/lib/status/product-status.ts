@@ -85,6 +85,8 @@ function severityOf(google: string | undefined, resolution: string | undefined):
   return 'info';
 }
 
+const byCode = (a: StatusIssue, b: StatusIssue) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0);
+
 export function groupIssues(answers: OfferAnswer[]): StatusIssue[] {
   const groups = new Map<string, StatusIssue>();
   const add = (code: string, severity: StatusIssue['severity'], inputId: string, countries: string[], from: Partial<StatusIssue>) => {
@@ -116,9 +118,10 @@ export function groupIssues(answers: OfferAnswer[]): StatusIssue[] {
     }
   }
 
+  // Sorted whole, so the order Google lists issues and offers in never changes the status hash.
   return [...groups.values()]
-    .map((issue) => ({ ...issue, offers: issue.offers.slice(0, MAX_OFFERS_PER_ISSUE), countries: [...issue.countries].sort() }))
-    .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || b.offers.length - a.offers.length)
+    .map((issue) => ({ ...issue, offers: [...issue.offers].sort().slice(0, MAX_OFFERS_PER_ISSUE), countries: [...issue.countries].sort() }))
+    .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || b.offers.length - a.offers.length || byCode(a, b))
     .slice(0, MAX_ISSUES);
 }
 

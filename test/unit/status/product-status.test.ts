@@ -114,6 +114,18 @@ describe('productStatus', () => {
     expect(productStatus(answers).issues[0].offers).toHaveLength(20);
   });
 
+  it('the same issues in another order hash the same', () => {
+    const a = { code: 'a', severity: 'DISAPPROVED', description: 'A' };
+    const b = { code: 'b', severity: 'DISAPPROVED', description: 'B' };
+    const ids = Array.from({ length: 25 }, (_, i) => `o${String(i).padStart(2, '0')}`);
+    const one = productStatus(ids.map((id) => disapproved(id, [a, b])));
+    const two = productStatus([...ids].reverse().map((id) => disapproved(id, [b, a])));
+    expect(one.issues.map((i) => i.code)).toEqual(['a', 'b']);
+    expect(one.issues[0].offers).toEqual(ids.slice(0, 20));
+    expect(two.issues).toEqual(one.issues);
+    expect(two.hash).toBe(one.hash);
+  });
+
   it('the hash ignores offer order and changes when an issue appears', () => {
     const issue = [{ code: 'c', severity: 'DISAPPROVED', description: 'c', applicableCountries: ['US'] }];
     const one = productStatus([disapproved('a', issue), disapproved('b', issue)]);
