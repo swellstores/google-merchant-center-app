@@ -860,6 +860,18 @@ describe('runCourier hourly', () => {
     expect([...store.google.inputs.keys()]).toEqual([`${DS}|en~US~p1`]);
     expect(store.collections['/queue-items']).toEqual([]);
   });
+
+  it('an hourly run starts no refresh while a catalog sync runs', async () => {
+    const { ctx, swell } = await quiet();
+    await saveState(swell, (await loadState(swell)).id, {
+      status_refresh: null,
+      full_sync: { $set: { status: 'running', cursor: null, total: 1, done: 0, date_started: at(NOW - 8 * HOUR) } },
+    });
+    expect(await runCourier(ctx, hourly)).toEqual({ next: 'idle', sent: 1 });
+    const state = await loadState(swell);
+    expect(state.full_sync).toMatchObject({ status: 'done' });
+    expect(state.status_refresh ?? null).toBeNull();
+  });
 });
 
 describe('runCourier status jobs', () => {

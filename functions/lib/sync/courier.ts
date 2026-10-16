@@ -127,7 +127,7 @@ function idleReset(state: SyncState | null): Record<string, unknown> | null {
 /** The status jobs an hourly run starts: those that are due. */
 function dueJobs(state: SyncState | null, now: number): Partial<Jobs> {
   return {
-    ...(refreshDue(state?.status_refresh, now) ? { status_refresh: newStatusRefreshJob(now) } : {}),
+    ...(refreshDue(state, now) ? { status_refresh: newStatusRefreshJob(now) } : {}),
     ...(orphanScanDue(state?.orphan_scan, now) ? { orphan_scan: newOrphanScanJob(now) } : {}),
   };
 }
