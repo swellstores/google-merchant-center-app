@@ -25,13 +25,17 @@ export function alarmWrite(alarm: Alarm | null, at: number | null): BatchOp | nu
   return alarm ? { method: 'put', url: `${COLLECTION}/${alarm.id}`, data: { wake_at: wakeAt } } : { method: 'post', url: COLLECTION, data: { wake_at: wakeAt } };
 }
 
+/** An alarm due this soon may bring a run that reads the queue before a change the caller is writing. */
+export const ARM_MARGIN_MS = 2000;
+
 /**
  * The write that makes sure the courier runs within `delayMs`, or null. An
- * alarm that rings sooner is kept; one in the past is replaced, because its
- * run may already be over.
+ * alarm that rings sooner is kept; one in the past or about to ring is
+ * replaced, because its run may be over or may miss the change. A new value
+ * only adds a run: the platform cancels none.
  */
 export function armWrite(alarm: Alarm | null, now: number, delayMs: number): BatchOp | null {
   const current = alarm?.wake_at ? Date.parse(alarm.wake_at) : null;
-  if (current !== null && current > now && current <= now + delayMs) return null;
+  if (current !== null && current > now + ARM_MARGIN_MS && current <= now + delayMs) return null;
   return alarmWrite(alarm, now + delayMs);
 }

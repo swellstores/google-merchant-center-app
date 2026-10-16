@@ -23,6 +23,12 @@ describe('alarm', () => {
     expect(armWrite({ id: 'a1', wake_at: at(NOW + 15_000) }, NOW, 15_000)).toBeNull();
   });
 
+  it('arms anew over an alarm due within 2 s, whose run may read the queue before this change', () => {
+    expect(armWrite({ id: 'a1', wake_at: at(NOW + 1_500) }, NOW, 15_000)).toMatchObject({ data: { wake_at: at(NOW + 15_000) } });
+    expect(armWrite({ id: 'a1', wake_at: at(NOW + 2_000) }, NOW, 15_000)).toMatchObject({ data: { wake_at: at(NOW + 15_000) } });
+    expect(armWrite({ id: 'a1', wake_at: at(NOW + 2_001) }, NOW, 15_000)).toBeNull();
+  });
+
   it('replaces an alarm in the past, which may never ring again', () => {
     expect(armWrite({ id: 'a1', wake_at: at(NOW - 60_000) }, NOW, 15_000)).toMatchObject({ data: { wake_at: at(NOW + 15_000) } });
   });
