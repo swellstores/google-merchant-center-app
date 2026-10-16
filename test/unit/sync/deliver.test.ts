@@ -240,6 +240,16 @@ describe('deliver', () => {
     expect(google.inputs.has(`${DS}|en~US~vOld`)).toBe(false);
   });
 
+  it('deletes the offers a revision sent when its product is gone', async () => {
+    const { google, env } = setup([]);
+    google.inputs.set(`${DS}|en~US~v1`, {});
+    google.inputs.set(`${DS}|en~US~v3`, {});
+    // An update's unit: v3 was sent (upserted) in this revision, then the product was deleted.
+    const report = await deliver(env, [unit('gone', 'full', { inputIds: ['en~US~v1', 'en~US~v3'], doneInputIds: ['en~US~v3'] })]);
+    expect(report.done).toHaveLength(1);
+    expect(google.inputs.size).toBe(0);
+  });
+
   it('skips a delete done earlier in this revision', async () => {
     const { google, env } = setup([]);
     google.inputs.set(`${DS}|en~US~v2`, {});

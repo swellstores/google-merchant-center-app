@@ -82,16 +82,25 @@ function planUnit(env: DeliveryEnv, unit: WorkUnit, product: SwellProduct | null
   const ops: Op[] = [];
   const partId = () => `${unit.productId}-${ops.length}`;
   const done = new Set(unit.doneInputIds ?? []);
-  const addDelete = (inputId: string) => {
-    if (done.has(inputId)) return; // deleted earlier in this revision
+  const deleteInput = (inputId: string) => {
     const dataSource = marketOfInput(env.markets, inputId)?.data_source;
     if (!dataSource) return;
     ops.push({ kind: 'delete', inputId, part: { id: partId(), call: deleteProductInput(env.accountId, dataSource, parseInputId(inputId)) } });
   };
+  const addDelete = (inputId: string) => {
+    if (!done.has(inputId)) deleteInput(inputId); // done in a delete's revision: deleted already
+  };
 
-  if (unit.kind === 'delete' || !product) {
+  if (unit.kind === 'delete') {
     unit.inputIds.forEach(addDelete);
     return { unit, product: null, skipped: null, ops, known: new Set(unit.inputIds), carried: [] };
+  }
+  if (!product) {
+    // The product is gone under an update: what its revision sent (done) was
+    // upserted, not deleted, so everything goes.
+    const all = [...new Set([...unit.inputIds, ...done])];
+    all.forEach(deleteInput);
+    return { unit, product: null, skipped: null, ops, known: new Set(all), carried: [] };
   }
 
   const fields: GoogleFields = product.$app?.[env.ctx.appId] ?? {};

@@ -224,6 +224,15 @@ describe('runCourier', () => {
     expect(google.inputs.get(`${DS}|en~US~p1`)?.productAttributes.title).toBe('Mug');
   });
 
+  it('deletes what an update sent when its product is gone and its delete is not in the run', async () => {
+    const { ctx, collections, google } = await steady([]);
+    collections['/queue-items'].push({ id: 'a', product_id: 'p1', kind: 'full', input_ids: [], done_input_ids: ['en~US~v3'], revision: 0, attempts: 0 });
+    google.inputs.set(`${DS}|en~US~v3`, {});
+    await runCourier(ctx);
+    expect(google.inputs.has(`${DS}|en~US~v3`)).toBe(false);
+    expect(collections['/queue-items']).toEqual([]);
+  });
+
   it('deletes every offer of a product deleted with its variants in one burst', async () => {
     const tee = {
       ...MUG,
