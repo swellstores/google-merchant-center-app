@@ -1,6 +1,7 @@
 import { vi } from 'vitest';
 
 type Doc = Record<string, any>;
+type Method = 'get' | 'post' | 'put' | 'delete';
 
 function valueAt(doc: Doc, path: string) {
   return path.split('.').reduce<any>((value, key) => (value == null ? undefined : value[key]), doc);
@@ -13,6 +14,7 @@ function matches(doc: Doc, where: Doc = {}): boolean {
     const value = valueAt(doc, key);
     if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
       if ('$in' in cond) return (cond.$in as unknown[]).includes(value);
+      if ('$nin' in cond) return !(cond.$nin as unknown[]).includes(value);
       if ('$ne' in cond) return (value ?? null) !== (cond.$ne ?? null);
       if ('$gt' in cond) return value != null && String(value) > String(cond.$gt);
       if ('$lte' in cond) return value != null && String(value) <= String(cond.$lte);
@@ -42,9 +44,23 @@ export interface FakeSwellInit {
   details?: Doc;
 }
 
-/** In-memory Swell store with the app's collections, products and `/:details`. */
+/** Decides whether the store refuses a request: a message refuses it. */
+export type Refusal = (method: Method, url: string) => string | null | undefined;
+
+export interface FakeBatchOp {
+  method: Method;
+  url: string;
+  data?: Doc;
+}
+
+/**
+ * In-memory Swell store with the app's collections, products, `/:details` and
+ * `POST /:batch`. A batch applies its operations in order without going through
+ * the spied methods, so their calls are the round trips the code made.
+ */
 export function createFakeSwell(init: FakeSwellInit = {}) {
   let seq = 0;
+  let refusal: Refusal | undefined;
   const record = (data: Doc): Doc => {
     seq++;
     return { id: seq.toString(16).padStart(24, '0'), date_created: new Date(Date.UTC(2026, 9, 15) + seq * 1000).toISOString(), ...data };
@@ -62,9 +78,13 @@ export function createFakeSwell(init: FakeSwellInit = {}) {
     const m = url.match(/^(\/[^/]+)(?:\/([^/]+))?$/);
     return m ? { name: m[1], id: m[2] } : null;
   };
+  const refuse = (method: Method, url: string) => {
+    const message = refusal?.(method, url);
+    if (message) throw new Error(message);
+  };
 
-  const swell = {
-    get: vi.fn(async (url: string, query: Doc = {}) => {
+  const impl = {
+    get: async (url: string, query: Doc = {}) => {
       if (url === '/:details') return structuredClone(details);
       const parts = split(url);
       const list = parts && collections[parts.name];
@@ -79,28 +99,84 @@ export function createFakeSwell(init: FakeSwellInit = {}) {
       if (query.sort === 'id asc') docs = [...docs].sort(byField('id'));
       if (query.sort === 'date_created asc') docs = [...docs].sort(byField('date_created'));
       return { count: docs.length, results: docs.slice(0, query.limit ?? 15).map((d) => structuredClone(d)) };
-    }),
-    post: vi.fn(async (url: string, data: Doc) => {
+    },
+    post: async (url: string, data: Doc) => {
       const list = collections[url];
       if (!list) throw new Error(`unexpected POST ${url}`);
       const doc = applyPatch(record({}), data);
       list.push(doc);
       return structuredClone(doc);
-    }),
-    put: vi.fn(async (url: string, patch: Doc) => {
+    },
+    put: async (url: string, patch: Doc) => {
       const parts = split(url);
       const doc = parts?.id ? collections[parts.name]?.find((d) => d.id === parts.id) : undefined;
       if (!doc) throw new Error(`unexpected PUT ${url}`);
       return structuredClone(applyPatch(doc, patch));
-    }),
-    delete: vi.fn(async (url: string) => {
+    },
+    delete: async (url: string) => {
       const parts = split(url);
       const list = parts?.id ? collections[parts.name] : undefined;
       const index = list ? list.findIndex((d) => d.id === parts!.id) : -1;
       if (!list || index < 0) throw new Error(`unexpected DELETE ${url}`);
       return list.splice(index, 1)[0];
+    },
+  };
+
+  /** One batch entry, answered the way the platform answers it. */
+  async function entry(op: FakeBatchOp): Promise<unknown> {
+    const refused = refusal?.(op.method, op.url);
+    if (refused) return { $error: refused };
+    if (op.url === '/:details') return op.method === 'get' ? structuredClone(details) : { $error: `Cannot ${op.method} ${op.url}` };
+    const parts = split(op.url);
+    const list = parts && collections[parts.name];
+    if (!list) return { $error: `Unknown path ${op.url}` };
+    if (parts.id && !list.some((d) => d.id === parts.id)) return null;
+    return impl[op.method](op.url, op.data ?? {});
+  }
+
+  const swell = {
+    get: vi.fn(async (url: string, query: Doc = {}) => {
+      refuse('get', url);
+      return impl.get(url, query);
+    }),
+    post: vi.fn(async (url: string, data: any): Promise<any> => {
+      if (url === '/:batch') {
+        const answers: unknown[] = [];
+        for (const op of data as FakeBatchOp[]) answers.push(await entry(op));
+        return answers;
+      }
+      refuse('post', url);
+      return impl.post(url, data);
+    }),
+    put: vi.fn(async (url: string, patch: Doc) => {
+      refuse('put', url);
+      return impl.put(url, patch);
+    }),
+    delete: vi.fn(async (url: string) => {
+      refuse('delete', url);
+      return impl.delete(url);
     }),
   };
 
-  return { swell, collections, details };
+  return {
+    swell,
+    collections,
+    details,
+    /** Makes the store refuse requests, directly (a throw) and inside a batch (`{ $error }`). */
+    refuse: (rule: Refusal) => {
+      refusal = rule;
+    },
+  };
+}
+
+type FakeSwell = ReturnType<typeof createFakeSwell>['swell'];
+
+/** The operations of every batch the code sent, in order. */
+export function batchesOf(swell: FakeSwell): FakeBatchOp[][] {
+  return swell.post.mock.calls.filter(([url]) => url === '/:batch').map(([, ops]) => ops as FakeBatchOp[]);
+}
+
+/** The requests the code made itself, a batch counting as one. */
+export function roundTrips(swell: FakeSwell): number {
+  return swell.get.mock.calls.length + swell.post.mock.calls.length + swell.put.mock.calls.length + swell.delete.mock.calls.length;
 }

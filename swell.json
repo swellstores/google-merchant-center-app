@@ -6,6 +6,7 @@
   "description": "List your products in Google Shopping and free listings",
   "support_email": "support@swell.is",
   "permissions": [
-    "write_products"
+    "write_products",
+    "write_:batch"
   ]
 }
