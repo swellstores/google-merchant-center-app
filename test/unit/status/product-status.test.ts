@@ -4,6 +4,7 @@ import {
   offerStatus,
   pendingStatus,
   productStatus,
+  refusedStatus,
   skippedStatus,
   statusFields,
   type GoogleProductStatus,
@@ -149,5 +150,21 @@ describe('statusFields', () => {
       date_status: '2026-10-16T10:00:00.000Z',
       $set: { status_issues: status.issues },
     });
+  });
+});
+
+describe('refusedStatus', () => {
+  it('refusedStatus is not_sent with Google’s message as the issue', () => {
+    const status = refusedStatus('Invalid GTIN', ['a', 'b']);
+    expect(status).toMatchObject({ status: 'not_sent', label: 'Not sent: Google refused it' });
+    expect(status.issues).toEqual([
+      { code: 'refused_by_google', severity: 'disapproved', description: 'Invalid GTIN', offers: ['a', 'b'], countries: [] },
+    ]);
+    expect(status.hash).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  it('caps the offers at 20', () => {
+    const ids = Array.from({ length: 25 }, (_, i) => `o${i}`);
+    expect(refusedStatus('x', ids).issues[0].offers).toHaveLength(20);
   });
 });

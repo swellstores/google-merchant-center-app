@@ -6,7 +6,7 @@ import { deleteProductInput, insertProductInput, patchProductInput, type Product
 import { buildOffers, marketOfInput, parseInputId, type OfferDefaults, type SkipReason } from '../mapping/offers';
 import type { GoogleFields, SwellProduct } from '../mapping/types';
 import { listOf, type BatchOp, type Outbox } from '../swell-batch';
-import { pendingStatus, skippedStatus, statusFields, type ProductStatus } from '../status/product-status';
+import { pendingStatus, refusedStatus, skippedStatus, statusFields, type ProductStatus } from '../status/product-status';
 import { iso, type Budget } from '../time';
 import type { WorkUnit } from './queue';
 
@@ -151,6 +151,7 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
   const completed: string[] = [];
   const stillThere: string[] = [];
   const errors: string[] = [];
+  const refused: string[] = [];
   let keep = false;
   let upgrade = false;
   let charge = false;
@@ -194,6 +195,7 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
       continue;
     }
     errors.push(message);
+    if (op.kind !== 'delete') refused.push(op.inputId);
     if (op.kind === 'delete' || plan.known.has(op.inputId)) stillThere.push(op.inputId);
   }
 
@@ -205,6 +207,14 @@ function settlePlan(env: DeliveryEnv, plan: Plan, results: Map<string, BatchResu
       keep: false,
       fields: { sync_state: 'skipped', sync_reason: plan.skipped, sync_error: errors[0] ?? null, input_ids: stillThere, date_synced },
       status: skippedStatus(plan.skipped),
+    };
+  }
+  const inGoogle = plan.carried.length + sent.length + stillThere.length > 0;
+  if (errors.length && !inGoogle) {
+    return {
+      keep: false,
+      status: refusedStatus(errors[0], refused),
+      fields: { sync_state: 'error', sync_reason: null, sync_error: errors[0], input_ids: [], date_synced },
     };
   }
   const stored = (plan.product.$app?.[env.ctx.appId] as GoogleFields | undefined)?.status;

@@ -156,6 +156,26 @@ describe('deliver', () => {
     expect(appFields('p1')).toMatchObject({ sync_state: 'error', sync_error: 'Invalid GTIN', input_ids: [] });
   });
 
+  it('a product whose every offer Google refused is not sent, with Google’s message', async () => {
+    const reject = { status: 400, body: { error: { code: 400, message: 'Invalid GTIN' } } };
+    const stored = { status: 'approved', status_label: 'Approved', status_hash: 'abc' };
+    const { env, appFields } = setup([mug({ $app: { [APP_ID]: stored } })], { offerErrors: { p1: reject } });
+    await deliver(env, [unit('p1')]);
+    expect(appFields('p1')).toMatchObject({
+      status: 'not_sent',
+      status_label: 'Not sent: Google refused it',
+      status_issues: [{ code: 'refused_by_google', severity: 'disapproved', description: 'Invalid GTIN', offers: ['en~US~p1'], countries: [] }],
+    });
+  });
+
+  it('a product with one refused and one sent offer is pending', async () => {
+    const reject = { status: 400, body: { error: { code: 400, message: 'Invalid GTIN' } } };
+    const variants = { results: [{ id: 'v1', name: 'Red', active: true }, { id: 'v2', name: 'Blue', active: true }] };
+    const { env, appFields } = setup([mug({ variants })], { offerErrors: { v2: reject } });
+    await deliver(env, [unit('p1')]);
+    expect(appFields('p1')).toMatchObject({ sync_state: 'error', status: 'pending', input_ids: ['en~US~v1'] });
+  });
+
   it('keeps a unit whose offer was rate limited and finishes the others', async () => {
     const rate = { status: 429, body: { error: { message: 'quota/request_rate_too_high' } } };
     const { env } = setup([mug(), mug({ id: 'p2', slug: 'p2' })], { offerErrors: { p2: rate } });

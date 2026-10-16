@@ -154,6 +154,17 @@ export function pendingStatus(): ProductStatus {
   return build('pending', LABELS.pending, []);
 }
 
+export function refusedStatus(message: string, inputIds: string[]): ProductStatus {
+  const issue: StatusIssue = {
+    code: 'refused_by_google',
+    severity: 'disapproved',
+    description: message,
+    offers: inputIds.slice(0, MAX_OFFERS_PER_ISSUE),
+    countries: [],
+  };
+  return build('not_sent', 'Not sent: Google refused it', [issue]);
+}
+
 export function earliestExpiry(answers: OfferAnswer[]): number | null {
   let earliest: number | null = null;
   for (const answer of answers) {
