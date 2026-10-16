@@ -14,6 +14,10 @@ function request(method: string, data: Record<string, any> = {}, swellContext: u
 }
 
 describe('sync route', () => {
+  it('names the component it serves', () => {
+    expect(route.config.description).toBe('Sync dashboard data and actions, for the SyncDashboard component');
+  });
+
   it('refuses a component call without admin context', async () => {
     await expect(route.get(request('GET', {}, null))).rejects.toMatchObject({ status: 403 });
     await expect(route.get(request('GET', {}, { ...ADMIN, surface: 'storefront' }))).rejects.toMatchObject({ status: 403 });

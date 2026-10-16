@@ -3,7 +3,7 @@ import { errorResponse, requireAdmin } from './lib/admin';
 import { AppError, contextFrom } from './lib/context';
 
 export const config: SwellConfig = {
-  description: 'Sync dashboard data and actions, for the GoogleSync component',
+  description: 'Sync dashboard data and actions, for the SyncDashboard component',
   route: { methods: ['get', 'post'], cache: { timeout: 0 } },
 };
 
