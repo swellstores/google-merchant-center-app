@@ -1,3 +1,5 @@
+import type { StatusIssue, StatusValue } from '../status/product-status';
+
 export interface SwellImage {
   file?: { url?: string | null } | null;
 }
@@ -37,6 +39,11 @@ export interface GoogleFields {
   sync_error?: string | null;
   date_synced?: string | null;
   input_ids?: string[];
+  status?: StatusValue | null;
+  status_label?: string | null;
+  status_issues?: StatusIssue[];
+  status_hash?: string | null;
+  date_status?: string | null;
 }
 
 export interface SwellProduct {

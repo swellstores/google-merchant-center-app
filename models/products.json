@@ -16,6 +16,11 @@
     "sync_reason": { "type": "string" },
     "sync_error": { "type": "string" },
     "date_synced": { "type": "date" },
-    "input_ids": { "type": "array", "value_type": "string", "description": "Product inputs last sent, language~country~offerId" }
+    "input_ids": { "type": "array", "value_type": "string", "description": "Product inputs last sent, language~country~offerId" },
+    "status": { "type": "string", "enum": ["approved", "partial", "pending", "disapproved", "not_sent", "excluded"] },
+    "status_label": { "type": "string" },
+    "status_issues": { "type": "array", "value_type": "object" },
+    "status_hash": { "type": "string" },
+    "date_status": { "type": "date" }
   }
 }

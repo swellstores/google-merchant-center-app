@@ -30,6 +30,13 @@ describe('planFromEvent', () => {
     expect(planFromEvent(APP, ev('product.updated', data), { id: 'p1' })).toBeNull();
   });
 
+  it('a status write does not queue the product', () => {
+    const data = {
+      $app: { [APP]: { status: 'approved', status_label: 'Approved', status_hash: 'x', date_status: '2026-10-16T10:00:00.000Z', status_issues: [] } },
+    };
+    expect(planFromEvent(APP, ev('product.updated', data), { id: 'p1' })).toBeNull();
+  });
+
   it('ignores changes Google never sees', () => {
     expect(planFromEvent(APP, ev('product.updated', { date_updated: 'x', meta_title: 'y' }), { id: 'p1' })).toBeNull();
     expect(planFromEvent(APP, ev('product.updated', { $app: { other_app: { x: 1 } } }), { id: 'p1' })).toBeNull();

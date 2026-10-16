@@ -9,7 +9,10 @@ const VARIANT_FIELDS = new Set(['name', 'active', 'archived', 'price', 'sale', '
 const LIGHT_FIELDS = new Set(['price', 'sale', 'sale_price', 'purchase_options', 'stock_level', 'stock_status']);
 
 /** Fields the courier writes; changing them must not queue the product again. */
-export const SYSTEM_FIELDS = new Set(['sync_state', 'sync_reason', 'sync_error', 'date_synced', 'input_ids']);
+export const SYSTEM_FIELDS = new Set([
+  'sync_state', 'sync_reason', 'sync_error', 'date_synced', 'input_ids',
+  'status', 'status_label', 'status_issues', 'status_hash', 'date_status',
+]);
 
 export interface EventPlan {
   productId: string;

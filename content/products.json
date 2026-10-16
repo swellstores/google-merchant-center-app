@@ -54,9 +54,12 @@
     },
     { "id": "sync_reason", "label": "Why not sent", "type": "short_text", "readonly": true },
     { "id": "sync_error", "label": "Last Google error", "type": "long_text", "readonly": true },
-    { "id": "date_synced", "label": "Last sent", "type": "datetime", "readonly": true }
+    { "id": "date_synced", "label": "Last sent", "type": "datetime", "readonly": true },
+    { "id": "status_label", "label": "Google", "type": "short_text", "readonly": true },
+    { "id": "date_status", "label": "Status checked", "type": "datetime", "readonly": true }
   ],
   "views": [
+    { "id": "list", "fields": [{ "id": "status_label" }] },
     {
       "id": "edit",
       "tabs": [
