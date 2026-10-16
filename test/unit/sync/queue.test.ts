@@ -197,6 +197,19 @@ describe('settleQueue', () => {
     expect(collections['/queue-items'][0]).toMatchObject({ input_ids: ['en~US~p1'], done_input_ids: ['x'] });
   });
 
+  it('recreates a kept item removed meanwhile with its product, keeping a pending delete', async () => {
+    const { swell, collections } = createFakeSwell();
+    await enqueue(swell, { productId: 'p1', kind: 'delete', inputIds: ['en~US~p1'] });
+    const [unit] = unitsFromQueue(await takeQueue(swell, 10));
+    const ctx = testContext(swell);
+    const [current] = await swellBatch(swell, [itemsRead(unit.queueItemIds)]);
+    const { writes } = settleWrites(ctx, [], [{ ...unit, kind: 'light', error: 'rate limited' }], listOf<QueueItem>(current, 'the queue'));
+    // Removed (a disconnect, another run) between the read and the write.
+    collections['/queue-items'].length = 0;
+    await swellBatch(swell, writes);
+    expect(collections['/queue-items']).toEqual([expect.objectContaining({ product_id: 'p1', kind: 'delete', input_ids: ['en~US~p1'] })]);
+  });
+
   it('keeps the input ids of a kept unit\'s duplicates', async () => {
     const { swell, collections } = createFakeSwell();
     collections['/queue-items'].push(

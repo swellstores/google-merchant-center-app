@@ -61,8 +61,11 @@ export function enqueueWrite(current: QueueItem | undefined, plan: QueuePlan): B
   return {
     method: 'put',
     url: `${COLLECTION}/${current.id}`,
-    // An update merges arrays by position and never shortens them: lists are replaced.
+    // An update merges arrays by position and never shortens them: lists are
+    // replaced. The product goes along: a run may remove the item before this
+    // write, which then creates it again (a PUT to a missing id does).
     data: {
+      product_id: current.product_id,
       kind: mergeKind(current.kind, plan.kind),
       revision: (current.revision ?? 0) + 1,
       // The product changed: every offer is sent again. Offers sent for the old
@@ -168,7 +171,9 @@ export function settleWrites(ctx: AppContext, done: WorkUnit[], kept: WorkUnit[]
     writes.push({
       method: 'put',
       url: `${COLLECTION}/${keep}`,
+      // With its product, for the same reason as in enqueueWrite.
       data: {
+        product_id: item.product_id,
         kind: mergeKind(item.kind, unit.kind),
         input_ids: { $set: [...new Set([...(item.input_ids ?? []), ...unit.inputIds])] },
         done_input_ids: {

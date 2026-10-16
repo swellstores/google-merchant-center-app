@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadConnection } from '../../../functions/lib/connection/store';
 import { loadMarkets } from '../../../functions/lib/connection/markets';
 import { COURIER_BUDGET_MS, NEXT_RUN_MS, pacedDelay, PASS_PRODUCTS, runCourier } from '../../../functions/lib/sync/courier';
-import { MAX_ATTEMPTS } from '../../../functions/lib/sync/queue';
+import { MAX_ATTEMPTS, queueChange } from '../../../functions/lib/sync/queue';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
 import { APP_ID, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
@@ -204,6 +204,24 @@ describe('runCourier', () => {
     // The restarted sync sends the whole catalog from the start, p00–p06 included.
     expect([...google.inputs.keys()].map((key) => key.split('~')[2]).sort()).toEqual(ids);
     expect((await loadState(swell)).full_sync).toMatchObject({ status: 'done', date_started: at(NOW), cursor: ids.at(-1), done: ids.length });
+  });
+
+  it('re-sends a product whose queue item a run removed between enqueue’s read and its write', async () => {
+    const sent = { ...MUG, $app: { [APP_ID]: { input_ids: ['en~US~p1'] } } };
+    const { ctx, swell, collections, google } = await steady([sent]);
+    google.inputs.set(`${DS}|en~US~p1`, { offerId: 'p1', productAttributes: { title: 'Old' } });
+    await enqueue(swell, { productId: 'p1', kind: 'light', inputIds: ['en~US~p1'] });
+    // A courier run settles the item just after enqueue read it.
+    const post = swell.post.getMockImplementation()!;
+    swell.post.mockImplementation(async (url: string, data: any) => {
+      if (url === '/:batch' && data.some((op: any) => op.method === 'put' && op.url.startsWith('/queue-items/'))) collections['/queue-items'].length = 0;
+      return post(url, data);
+    });
+    await queueChange(ctx, { productId: 'p1', kind: 'full' });
+    swell.post.mockImplementation(post);
+    expect(collections['/queue-items']).toEqual([expect.objectContaining({ product_id: 'p1', kind: 'full' })]);
+    await runCourier(ctx);
+    expect(google.inputs.get(`${DS}|en~US~p1`)?.productAttributes.title).toBe('Mug');
   });
 
   it('backs off after a rate limit and keeps the queue', async () => {
