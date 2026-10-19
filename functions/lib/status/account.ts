@@ -61,6 +61,8 @@ function requirementReasons(programs: unknown, market: Set<string>): AccountReas
     if (!isObject(program)) continue;
     const id = text(program.name)?.split('/').pop();
     if (id !== 'free-listings' && id !== 'shopping-ads') continue;
+    // Shopping ads matter only to a merchant who runs them.
+    if (id === 'shopping-ads' && program.state !== 'ENABLED') continue;
     for (const requirement of list(program.unmetRequirements)) {
       if (!isObject(requirement)) continue;
       const code = text(requirement.title);

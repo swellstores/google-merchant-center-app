@@ -81,6 +81,7 @@ describe('accountReasons', () => {
       programs: [
         {
           name: 'accounts/1/programs/shopping-ads',
+          state: 'ENABLED',
           unmetRequirements: [{ title: 'HAS_SUPPORT_CONTACT', affectedRegionCodes: ['US'] }],
         },
       ],
@@ -92,6 +93,18 @@ describe('accountReasons', () => {
       action: 'Add a customer service email, phone or contact page in Merchant Center.',
       documentation: null,
     });
+  });
+
+  it('shopping-ads requirements count only while the program is enabled', () => {
+    const answer = (state?: string) => ({
+      programs: [
+        { name: 'accounts/1/programs/shopping-ads', state, unmetRequirements: [{ title: 'HAS_WEBSITE', affectedRegionCodes: ['US'] }] },
+        { name: 'accounts/1/programs/free-listings', state, unmetRequirements: [{ title: 'HAS_RETURN_POLICY', affectedRegionCodes: ['US'] }] },
+      ],
+    });
+    const programs = (state?: string) => accountReasons(answer(state), {}, ['US']).map((r) => r.program);
+    expect(programs('ENABLED')).toEqual(['free-listings', 'shopping-ads']);
+    for (const state of ['ELIGIBLE', 'NOT_ELIGIBLE', undefined]) expect(programs(state)).toEqual(['free-listings']);
   });
 
   it('makes unknown codes readable', () => {
