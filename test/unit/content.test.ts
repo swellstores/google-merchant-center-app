@@ -47,7 +47,11 @@ describe('products content, Google tab', () => {
     expect(tab.fields[0]).toEqual({ id: 'excluded' });
     expect(tab.fields).toHaveLength(3);
 
-    const group = tab.fields[1];
+    // The admin moves top-level groups to a tab strip after all other fields; a group inside a row stays in place
+    const row: any = tab.fields[1];
+    expect(row.type).toBe('field_row');
+    expect(row.fields).toHaveLength(1);
+    const group: any = row.fields[0];
     expect(group.type).toBe('field_group');
     expect(group.label).toBe('Product details for Google');
     expect(group.fields.map((f: any) => f.id ?? f.fields.map((c: any) => c.id))).toEqual([
@@ -77,7 +81,7 @@ describe('products content, Google tab', () => {
     expect(byId('excluded')).toMatchObject({
       type: 'component',
       component: 'GoogleListingSwitch',
-      label: 'List this product in Google',
+      label: 'Google listing',
     });
     expect(byId('brand')).toMatchObject({ type: 'component', component: 'BrandInput' });
     expect(byId('google_category')).toMatchObject({

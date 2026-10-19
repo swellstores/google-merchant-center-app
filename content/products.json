@@ -6,7 +6,7 @@
   "fields": [
     {
       "id": "excluded",
-      "label": "List this product in Google",
+      "label": "Google listing",
       "type": "component",
       "component": "GoogleListingSwitch",
       "hint": "Turn off to keep this product out of Google Shopping and free listings. Products already in Google are removed within minutes."
@@ -89,14 +89,19 @@
           "fields": [
             { "id": "excluded" },
             {
-              "type": "field_group",
-              "label": "Product details for Google",
+              "type": "field_row",
               "fields": [
-                { "type": "field_row", "fields": [{ "id": "brand", "admin_span": 2 }, { "id": "condition", "admin_span": 2 }] },
-                { "id": "google_category" },
-                { "id": "identifier_exists" },
-                { "id": "identifiers" },
-                { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] }
+                {
+                  "type": "field_group",
+                  "label": "Product details for Google",
+                  "fields": [
+                    { "type": "field_row", "fields": [{ "id": "brand", "admin_span": 2 }, { "id": "condition", "admin_span": 2 }] },
+                    { "id": "google_category" },
+                    { "id": "identifier_exists" },
+                    { "id": "identifiers" },
+                    { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] }
+                  ]
+                }
               ]
             },
             {
