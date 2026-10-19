@@ -147,6 +147,12 @@ describe('deliver', () => {
     expect(appFields('p1')).toMatchObject({ needs_attributes: true });
   });
 
+  it('a first send of a product with a stored choice writes the marker true', async () => {
+    const { env, appFields } = setup([mug({ $app: { [APP_ID]: { attribute_options: { size: 'o1' } } } })]);
+    await deliver(env, [unit('p1')]);
+    expect(appFields('p1')).toMatchObject({ status: 'pending', needs_attributes: true });
+  });
+
   it('clearing a choice turns the marker off on the next send', async () => {
     const stored = { status: 'approved', status_label: 'Approved', status_hash: 'x', status_issues: [], attribute_options: { color: null }, needs_attributes: true };
     const { env, appFields } = setup([mug({ $app: { [APP_ID]: stored } })]);
