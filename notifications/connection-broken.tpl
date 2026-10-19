@@ -9,8 +9,10 @@
               <td style="padding:32px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:22px;color:#1f2933;">
                 <p style="margin:0 0 16px;font-size:13px;color:#6b7280;">{{ store.name }}</p>
                 <h1 style="margin:0 0 16px;font-size:20px;line-height:28px;color:#1f2933;">Google Merchant Center is disconnected</h1>
+                {% if last_error %}
                 <p style="margin:0 0 8px;">Google reported this problem with the connection:</p>
-                <p style="margin:0 0 16px;padding:12px 16px;background-color:#fef3f2;border-radius:4px;color:#7a271a;">{{ last_error }}</p>
+                <p style="margin:0 0 16px;padding:12px 16px;background-color:#fef3f2;border-radius:4px;color:#7a271a;">{{ last_error | escape }}</p>
+                {% endif %}
                 <p style="margin:0 0 24px;">Products are not being sent to Google until it is fixed.</p>
                 <p style="margin:0 0 24px;">
                   <a href="{{ store.url }}/admin/apps" style="display:inline-block;padding:10px 18px;background-color:#1f2933;color:#ffffff;text-decoration:none;border-radius:4px;">Open your apps</a>
