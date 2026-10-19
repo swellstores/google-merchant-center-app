@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Market } from '../../../functions/lib/connection/markets';
 import { measured } from '../../../functions/lib/context';
+import { COURIER_BUDGET_MS } from '../../../functions/lib/sync/courier';
 import { newOrphanScanJob, ORPHAN_PAGE, ORPHAN_PRODUCTS, ORPHAN_WRITES, orphanScanPass, type OrphanScanJob } from '../../../functions/lib/status/orphans';
 import { Outbox } from '../../../functions/lib/swell-batch';
 import type { DeliveryEnv } from '../../../functions/lib/sync/deliver';
@@ -184,18 +185,20 @@ describe('orphan scan pass', () => {
     expect(second.job).toMatchObject({ status: 'done', skip: 0, found: 0 });
   });
 
-  it('an orphan pass without time after its read writes nothing', async () => {
-    const google = createFakeGoogle({ strays: [stray(1), stray(2)] });
-    const fake = createFakeSwell({ products: [] });
+  it('an orphan pass at 1.3 s per round trip finishes its page', async () => {
+    const indexes = Array.from({ length: ORPHAN_PRODUCTS }, (_, i) => i + 1);
+    const google = createFakeGoogle({ strays: indexes.map((n) => stray(n)) });
+    const fake = createFakeSwell({ products: indexes.map((n) => product(n, n <= 5 ? [] : [offerOf(n)])) });
     const slow = slowServices(fake.swell, google.fetch, { swellMs: 1300, googleMs: 1500 });
-    // Time for the list (1.5 s) and the product read (1.3 s), not for the two round trips after them.
+    // The courier's gate for a pass: the list, the products read, the writes and the end, with no time to spare after the read.
     const budget = new Budget(slow.now, 5000);
     const ctx = measured(testContext(slow.swell, slow.fetch, slow.now), budget);
     const env: DeliveryEnv = { ctx, accountId: '1', token: 't', markets: [MARKET], defaults: { condition: 'new' }, budget, outbox: new Outbox(ctx.swell) };
-    const job = newOrphanScanJob(NOW);
-    expect(await orphanScanPass(env, job, [stateById('s1')])).toEqual({ job, sentOps: 0, progressed: false, answers: [] });
-    expect(batchesOf(fake.swell).map((batch) => batch.map((op) => op.method))).toEqual([['get']]);
-    expect(await takeQueue(fake.swell, 10)).toEqual([]);
+    const pass = await orphanScanPass(env, newOrphanScanJob(NOW), [stateById('s1')]);
+    expect(pass.job).toMatchObject({ status: 'done', found: 5, skip: 0 });
+    expect(pass.progressed).toBe(true);
+    expect((await takeQueue(fake.swell, 20)).length).toBe(5);
+    expect(slow.now() - NOW).toBeLessThanOrEqual(COURIER_BUDGET_MS + 1500);
   });
 
   it('leaves the job without a round trip when there is no time for the page', async () => {

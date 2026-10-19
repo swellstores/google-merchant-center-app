@@ -107,8 +107,6 @@ export async function orphanScanPass(env: DeliveryEnv, job: OrphanScanJob, reads
   if (groups.size) {
     const answer = (await env.outbox.send([productsRead([...groups.keys()])]))[0];
     for (const product of listOf<SwellProduct>(answer, 'the products listed in Google')) found.set(product.id, product);
-    // The writes and the run's end still need their round trips; Google is done.
-    if (!env.budget.allows(2, 0)) return unchanged;
   }
 
   const next = structuredClone(job);
