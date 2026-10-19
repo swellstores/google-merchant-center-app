@@ -74,6 +74,12 @@ describe('variantAttributes', () => {
     expect(variantAttributes(renamed, variant('d'), { color: 'o2' })).toEqual({ color: 'Rust' });
   });
 
+  it('trims the value name, and a blank one sends nothing', () => {
+    const spaced = { ...product, options: [{ id: 'o1', name: 'Size', variant: true, values: [{ id: 'a', name: '  S ' }, { id: 'b', name: '   ' }] }] };
+    expect(variantAttributes(spaced, variant('a'), { size: 'o1' })).toEqual({ size: 'S' });
+    expect(variantAttributes(spaced, variant('b'), { size: 'o1' })).toEqual({});
+  });
+
   it('a deleted option sends nothing', () => {
     expect(variantAttributes(product, variant('a'), { size: 'gone' })).toEqual({});
   });

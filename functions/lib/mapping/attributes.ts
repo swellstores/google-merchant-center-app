@@ -60,9 +60,9 @@ export function variantAttributes(
     const optionId = chosen[attribute];
     if (!optionId) continue;
     const option = product.options?.find((o) => o.id === optionId && o.variant);
-    const value = option?.values?.find((v) => valueIds.includes(v.id));
-    if (!value?.name) continue;
-    out[attribute] = value.name;
+    const name = option?.values?.find((v) => valueIds.includes(v.id))?.name?.trim();
+    if (!name) continue;
+    out[attribute] = name;
   }
   return out;
 }
