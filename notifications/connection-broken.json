@@ -7,10 +7,7 @@
   "event": "updated",
   "admin": true,
   "repeat": true,
-  "conditions": {
-    "$record.status": "broken",
-    "$origData.status": { "$ne": "broken" }
-  },
+  "conditions": { "status": "broken", "$record": { "status": { "$ne": "broken" } } },
   "subject": "Google Merchant Center is disconnected",
   "sample": {
     "status": "broken",
