@@ -7,6 +7,9 @@ export const OPTION_ATTRIBUTES = ['color', 'size', 'material', 'pattern'] as con
 /** Google attributes that are already native fields on the tab. */
 export const FIELD_ATTRIBUTES = { age_group: 'Age group', gender: 'Gender' } as const;
 
+/** Every attribute the tab can provide, option attributes first. */
+const PROVIDED: readonly string[] = [...OPTION_ATTRIBUTES, ...Object.keys(FIELD_ATTRIBUTES)];
+
 export type OptionAttribute = (typeof OPTION_ATTRIBUTES)[number];
 /** Google attribute → variant option id */
 export type AttributeOptions = Partial<Record<OptionAttribute, string | null>>;
@@ -22,9 +25,11 @@ export function googleAttribute(name: string | undefined): string | null {
   return spelled === 'colour' ? 'color' : spelled;
 }
 
+export const providesAttribute = (attribute: string | undefined) => attribute !== undefined && PROVIDED.includes(attribute);
+
 export function neededAttributes(issues: StatusIssue[]): string[] {
   const named = new Set(issues.map((issue) => issue.attribute));
-  return [...OPTION_ATTRIBUTES, ...Object.keys(FIELD_ATTRIBUTES)].filter((attribute) => named.has(attribute));
+  return PROVIDED.filter((attribute) => named.has(attribute));
 }
 
 export function needsAttributes(issues: StatusIssue[], chosen: AttributeOptions | null | undefined): boolean {

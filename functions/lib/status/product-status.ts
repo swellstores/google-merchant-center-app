@@ -1,4 +1,4 @@
-import { googleAttribute, needsAttributes, type AttributeOptions } from '../mapping/attributes';
+import { googleAttribute, needsAttributes, providesAttribute, type AttributeOptions } from '../mapping/attributes';
 import type { SkipReason } from '../mapping/offers';
 import { iso } from '../time';
 
@@ -95,6 +95,13 @@ function severityOf(google: string | undefined, resolution: string | undefined):
 export const issueKey = (issue: Pick<StatusIssue, 'code' | 'attribute'>) => `${issue.code}|${issue.attribute ?? ''}`;
 const byCode = (a: StatusIssue, b: StatusIssue) => (issueKey(a) < issueKey(b) ? -1 : issueKey(a) > issueKey(b) ? 1 : 0);
 
+/** At most `MAX_ISSUES`, in their order. An issue the tab can provide is cut last: the marker and the tab read it. */
+function capped(issues: StatusIssue[]): StatusIssue[] {
+  const provided = (issue: StatusIssue) => providesAttribute(issue.attribute);
+  const kept = new Set([...issues.filter(provided), ...issues.filter((issue) => !provided(issue))].slice(0, MAX_ISSUES));
+  return issues.filter((issue) => kept.has(issue));
+}
+
 /** `missing: false` leaves out the issue of offers Google does not hold, for a product just sent. */
 export function groupIssues(answers: OfferAnswer[], missing = true): StatusIssue[] {
   const groups = new Map<string, StatusIssue>();
@@ -133,10 +140,11 @@ export function groupIssues(answers: OfferAnswer[], missing = true): StatusIssue
   }
 
   // Sorted whole, so the order Google lists issues and offers in never changes the status hash.
-  return [...groups.values()]
-    .map((issue) => ({ ...issue, offers: [...issue.offers].sort().slice(0, MAX_OFFERS_PER_ISSUE), countries: [...issue.countries].sort() }))
-    .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || b.offers.length - a.offers.length || byCode(a, b))
-    .slice(0, MAX_ISSUES);
+  return capped(
+    [...groups.values()]
+      .map((issue) => ({ ...issue, offers: [...issue.offers].sort().slice(0, MAX_OFFERS_PER_ISSUE), countries: [...issue.countries].sort() }))
+      .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || b.offers.length - a.offers.length || byCode(a, b)),
+  );
 }
 
 /** FNV-1a, 32 bit. */
@@ -190,7 +198,7 @@ export function refusedStatus(message: string, inputIds: string[]): ProductStatu
 /** A product Google took only in part: its message comes first among the issues, and an approved product is partly approved. */
 export function partlyRefused(status: ProductStatus, message: string): ProductStatus {
   const approved = status.status === 'approved';
-  return build(approved ? 'partial' : status.status, approved ? LABELS.partial : status.label, [refusal(message, []), ...status.issues].slice(0, MAX_ISSUES));
+  return build(approved ? 'partial' : status.status, approved ? LABELS.partial : status.label, capped([refusal(message, []), ...status.issues]));
 }
 
 export function earliestExpiry(answers: OfferAnswer[]): number | null {

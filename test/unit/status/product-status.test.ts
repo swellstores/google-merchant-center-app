@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   earliestExpiry,
   offerStatus,
+  partlyRefused,
   pendingStatus,
   productStatus,
   refusedStatus,
@@ -233,6 +234,23 @@ describe('issue attribute', () => {
     const hash = (attribute?: string) => productStatus([disapproved('a', [issue(attribute)])]).hash;
     expect(hash('color')).not.toBe(hash('size'));
     expect(hash('color')).not.toBe(hash());
+  });
+
+  it('an attribute issue survives the issue cap', () => {
+    const bad = Array.from({ length: 12 }, (_, i) => ({ code: `bad_${i}`, severity: 'DISAPPROVED', description: 'b' }));
+    const demoted = (attribute: string) => ({ ...issue(attribute), severity: 'DEMOTED' });
+    const status = productStatus([disapproved('a', [...bad, demoted('size'), demoted('brand')])]);
+    expect(status.issues).toHaveLength(10);
+    // The tab cannot provide a brand, so it is cut like any other; the size keeps its place, last.
+    expect(status.issues.map((i) => i.attribute ?? i.code)).toEqual(['bad_0', 'bad_10', 'bad_11', 'bad_1', 'bad_2', 'bad_3', 'bad_4', 'bad_5', 'bad_6', 'size']);
+    expect(statusFields(status, 0).needs_attributes).toBe(true);
+
+    const full = productStatus([disapproved('a', [...bad.slice(0, 9), demoted('size')])]);
+    expect(full.issues).toHaveLength(10);
+    const refused = partlyRefused(full, 'Invalid GTIN');
+    expect(refused.issues).toHaveLength(10);
+    expect(refused.issues[0].code).toBe('refused_by_google');
+    expect(refused.issues.at(-1)?.attribute).toBe('size');
   });
 
   it('an issue without an attribute keeps its old hash', () => {
