@@ -2,7 +2,7 @@
 
 List your products in Google Shopping and free listings, and keep them current. Connect your Merchant Center account once, and your catalog is sent to Google and updated whenever a product, a price or the stock changes.
 
-## Connect in minutes
+## Connect step by step
 
 A guided page in your Swell dashboard walks you through the setup: a Google Cloud project, a service account key, access in Merchant Center, and your account ID. Each step shows whether Google accepts it, and what to fix if it does not.
 
