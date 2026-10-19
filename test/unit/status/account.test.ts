@@ -7,16 +7,16 @@ const DOC = 'https://support.google.com/merchants/answer/14286818';
 const programs = {
   programs: [
     {
-      name: 'accounts/401005146/programs/free-listings',
+      name: 'accounts/123/programs/free-listings',
       state: 'ENABLED',
       unmetRequirements: [
         { title: 'BUSINESS_INFORMATION', documentationUri: DOC, affectedRegionCodes: ['AE', 'DE', 'US'] },
         { title: 'HAS_KOREAN_BUSINESS_REGISTRATION_NUMBER', documentationUri: DOC, affectedRegionCodes: ['KR'] },
       ],
     },
-    { name: 'accounts/401005146/programs/shopping-ads', state: 'ELIGIBLE' },
+    { name: 'accounts/123/programs/shopping-ads', state: 'ELIGIBLE' },
     {
-      name: 'accounts/401005146/programs/youtube-shopping-checkout',
+      name: 'accounts/123/programs/youtube-shopping-checkout',
       state: 'NOT_ELIGIBLE',
       unmetRequirements: [{ title: 'HAS_SUPPORT_CONTACT', affectedRegionCodes: ['KR', 'US'] }],
     },
