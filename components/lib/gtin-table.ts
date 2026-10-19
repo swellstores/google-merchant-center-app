@@ -1,7 +1,7 @@
 import { validateGtin } from '../../functions/lib/mapping/gtin';
 import type { SwellVariant } from '../../functions/lib/mapping/types';
 
-export type Identifiers = Record<string, { gtin?: string; mpn?: string } | undefined>;
+export type Identifiers = Record<string, { gtin?: string | null; mpn?: string | null } | null | undefined>;
 
 export interface GtinRow {
   /** A variant id, or 'product' for the shared row. */
@@ -51,11 +51,16 @@ export function gtinTableModel(record: { variants?: unknown; $app?: Record<strin
   return { rows, disabled, note: disabled ? 'Not sent while the switch above is off' : null };
 }
 
+const blank = (cell: string | null | undefined) => !cell?.trim();
+
+/**
+ * A save merges the value into the stored object, where a left-out key keeps
+ * its stored value. So a cleared cell is sent as null, and so is an entry left
+ * with no value.
+ */
 export function setCell(value: Identifiers | null, key: string, cell: 'gtin' | 'mpn', text: string): Identifiers {
-  const { [key]: entry, ...rest } = value ?? {};
-  const { [cell]: _dropped, ...kept } = entry ?? {};
-  const next = text.trim() ? { ...kept, [cell]: text } : kept;
-  return Object.keys(next).length ? { ...rest, [key]: next } : rest;
+  const entry = { ...value?.[key], [cell]: blank(text) ? null : text };
+  return { ...value, [key]: blank(entry.gtin) && blank(entry.mpn) ? null : entry };
 }
 
 const REASONS = {

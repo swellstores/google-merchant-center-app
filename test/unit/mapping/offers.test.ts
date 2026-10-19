@@ -147,6 +147,21 @@ describe('buildOffers', () => {
     expect(blue.input.productAttributes.gtins).toBeUndefined();
   });
 
+  it('reads cleared (null) entries and cells as empty', () => {
+    const product: SwellProduct = {
+      ...SHIRT,
+      $app: { [APP]: { mpn: 'TS-1', identifiers: { v1: null, v2: { gtin: null, mpn: null } } } },
+    };
+    const [red, blue] = buildOffers(product, [MARKET], OPTS).offers;
+    expect(red.input.productAttributes).toMatchObject({ mpn: 'TS-1' });
+    expect(red.input.productAttributes.gtins).toBeUndefined();
+    expect(blue.input.productAttributes).toMatchObject({ mpn: 'TS-1' });
+    expect(blue.input.productAttributes.gtins).toBeUndefined();
+    const mug = buildOffers({ ...MUG, $app: { [APP]: { identifiers: { product: { gtin: null, mpn: null } } } } }, [MARKET], OPTS);
+    expect(mug.offers[0].input.productAttributes.gtins).toBeUndefined();
+    expect(mug.offers[0].input.productAttributes.mpn).toBeUndefined();
+  });
+
   it('falls back to product images when the variant’s images have no URL', () => {
     const product: SwellProduct = {
       ...SHIRT,

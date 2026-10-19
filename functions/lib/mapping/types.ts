@@ -33,7 +33,8 @@ export interface GoogleFields {
   age_group?: string;
   gender?: string;
   identifier_exists?: boolean;
-  identifiers?: Record<string, { gtin?: string; mpn?: string } | undefined>;
+  /** A cleared cell or entry is stored as null: a save merges into the stored object. */
+  identifiers?: Record<string, { gtin?: string | null; mpn?: string | null } | null | undefined>;
   sync_state?: 'sent' | 'error' | 'skipped';
   sync_reason?: string | null;
   sync_error?: string | null;
