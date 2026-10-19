@@ -50,8 +50,8 @@ describe('variantAttributes', () => {
   const variant = (...ids: string[]): SwellVariant => ({ id: 'v', option_value_ids: ids });
 
   it('a chosen size sends each variant its own value', () => {
-    expect(variantAttributes(product, variant('a'), { size: 'o1' })).toEqual({ sizes: ['S'] });
-    expect(variantAttributes(product, variant('b'), { size: 'o1' })).toEqual({ sizes: ['M'] });
+    expect(variantAttributes(product, variant('a'), { size: 'o1' })).toEqual({ size: 'S' });
+    expect(variantAttributes(product, variant('b'), { size: 'o1' })).toEqual({ size: 'M' });
   });
 
   it('sends color, material and pattern as strings, even from an inactive option', () => {
@@ -92,6 +92,6 @@ describe('variantAttributes', () => {
 
   it('options named Color are ignored until chosen', () => {
     expect(variantAttributes(product, variant('e'), {})).toEqual({});
-    expect(variantAttributes(product, variant('e'), { size: 'o3' })).toEqual({ sizes: ['Red'] });
+    expect(variantAttributes(product, variant('e'), { size: 'o3' })).toEqual({ size: 'Red' });
   });
 });

@@ -39,8 +39,8 @@ export function variantAttributes(
   product: SwellProduct,
   variant: SwellVariant | undefined,
   chosen: AttributeOptions | null | undefined,
-): Partial<Pick<ProductAttributes, 'color' | 'sizes' | 'material' | 'pattern'>> {
-  const out: Partial<Pick<ProductAttributes, 'color' | 'sizes' | 'material' | 'pattern'>> = {};
+): Partial<Pick<ProductAttributes, 'color' | 'size' | 'material' | 'pattern'>> {
+  const out: Partial<Pick<ProductAttributes, 'color' | 'size' | 'material' | 'pattern'>> = {};
   const valueIds = variant?.option_value_ids;
   if (!chosen || !valueIds?.length) return out;
   for (const attribute of OPTION_ATTRIBUTES) {
@@ -49,8 +49,7 @@ export function variantAttributes(
     const option = product.options?.find((o) => o.id === optionId && o.variant);
     const value = option?.values?.find((v) => valueIds.includes(v.id));
     if (!value?.name) continue;
-    if (attribute === 'size') out.sizes = [value.name];
-    else out[attribute] = value.name;
+    out[attribute] = value.name;
   }
   return out;
 }

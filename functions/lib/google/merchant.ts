@@ -24,7 +24,7 @@ export interface ProductAttributes {
   ageGroup?: string;
   gender?: string;
   color?: string;
-  sizes?: string[];
+  size?: string;
   material?: string;
   pattern?: string;
 }

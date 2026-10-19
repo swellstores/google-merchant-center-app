@@ -268,16 +268,16 @@ describe('buildOffers attributes from options', () => {
 
   it('sends each variant its own chosen values', () => {
     const { offers } = buildOffers(product, [MARKET], OPTS);
-    expect(offers.map((o) => [o.input.productAttributes.color, o.input.productAttributes.sizes])).toEqual([
-      ['Red', ['M']],
-      ['Blue', ['M']],
+    expect(offers.map((o) => [o.input.productAttributes.color, o.input.productAttributes.size])).toEqual([
+      ['Red', 'M'],
+      ['Blue', 'M'],
     ]);
   });
 
   it('sends nothing without a choice', () => {
     const { offers } = buildOffers({ ...product, $app: {} }, [MARKET], OPTS);
     expect(offers[0].input.productAttributes).not.toHaveProperty('color');
-    expect(offers[0].input.productAttributes).not.toHaveProperty('sizes');
+    expect(offers[0].input.productAttributes).not.toHaveProperty('size');
   });
 });
 
