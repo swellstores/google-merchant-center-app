@@ -154,6 +154,13 @@ describe('statusPanelModel', () => {
     expect(model.summaries).toEqual([{ heading: 'United States · en', text: 'Pending', tone: 'neutral' }]);
   });
 
+  it('a partly approved market reads partly approved', () => {
+    const summaries = (statuses: OfferView['status'][]) =>
+      statusPanelModel(view({ live: { checked_at: '2026-10-16T12:00:00Z', more: 0, offers: statuses.map((status, i) => offer({ input_id: String(i), variant: `V${i}`, status })) } }), NOW).summaries;
+    expect(summaries(['partial', 'partial'])[0].text).toBe('2 variants partly approved');
+    expect(summaries(['partial', 'approved'])[0].text).toBe('1 partly approved, 1 approved');
+  });
+
   it('the hidden note points to the switch above', () => {
     expect(statusPanelModel(view({ stored: { status: 'excluded' } }), NOW).hidden).toBe('Turn on “List this product in Google” above to list it again.');
     expect(statusPanelModel(view(), NOW).hidden).toBeNull();

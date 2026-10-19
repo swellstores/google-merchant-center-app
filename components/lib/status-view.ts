@@ -108,15 +108,15 @@ function noteOf(view: ProductStatusView): string | null {
   return null;
 }
 
-const LABELS: Record<string, string> = { disapproved: 'disapproved', partial: 'partly approved', pending: 'pending', approved: 'approved' };
+const label = (status: StatusValue) => STATUSES[status].text.toLowerCase();
 
 function summaryOf(group: OfferView[]): { text: string; tone: Tone } {
   const counts = WORST.map((status) => ({ status, n: group.filter((offer) => offer.status === status).length })).filter((c) => c.n > 0);
   const tone = STATUSES[counts[0].status].tone;
-  if (counts.length > 1) return { text: counts.map((c) => `${c.n} ${LABELS[c.status]}`).join(', '), tone };
+  if (counts.length > 1) return { text: counts.map((c) => `${c.n} ${label(c.status)}`).join(', '), tone };
   const { status, n } = counts[0];
   if (n === 1 && !group[0].variant) return { text: STATUSES[status].text, tone };
-  return { text: `${n} variant${n === 1 ? '' : 's'} ${LABELS[status]}`, tone };
+  return { text: `${n} variant${n === 1 ? '' : 's'} ${label(status)}`, tone };
 }
 
 export function statusPanelModel(view: ProductStatusView, now: number): StatusPanelModel {

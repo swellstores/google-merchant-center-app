@@ -14,7 +14,7 @@ function OfferIssues({ issues }: { issues: OfferIssue[] }) {
   return (
     <Stack as="ul" gap={12}>
       {issues.map((issue) => (
-        <li key={issue.code} style={{ overflowWrap: 'anywhere', borderLeft: `3px solid ${BORDERS[issue.tone]}`, paddingLeft: 12 }}>
+        <li key={issue.code} style={{ borderLeft: `3px solid ${BORDERS[issue.tone]}`, paddingLeft: 12 }}>
           <Stack gap={4}>
             <strong>{issue.description}</strong>
             {issue.detail && <div class="gmc-muted">{issue.detail}</div>}
@@ -133,62 +133,65 @@ export default function GoogleStatus(props: ComponentProps) {
   return (
     <Root>
       <Card>
-        <Stack gap={16}>
-          <Stack gap={8}>
-            <div class="gmc-actions">
-              <Pill tone={model.headline.tone}>{model.headline.text}</Pill>
-              {model.checked && <span class="gmc-muted">{model.checked}</span>}
-            </div>
-            {model.summaries.length > 0 && (
-              <Stack as="ul" gap={4}>
-                {model.summaries.map((summary) => (
-                  <li key={summary.heading} style={{ overflowWrap: 'anywhere' }}>
-                    {summary.heading} — <Pill tone={summary.tone}>{summary.text}</Pill>
-                  </li>
-                ))}
-              </Stack>
-            )}
-            {model.hidden && <span class="gmc-muted">{model.hidden}</span>}
-          </Stack>
-          {model.refusal && <Notice tone="bad">{model.refusal}</Notice>}
-          {model.note && <span class="gmc-muted">{model.note}</span>}
-          {hasDetails && (
-            <details>
-              <summary>Details</summary>
-              <Stack gap={16}>
-                {model.markets.map((group) => (
-                  <Stack key={group.market} gap={8}>
-                    <strong style={{ overflowWrap: 'anywhere' }}>{group.heading}</strong>
-                    <Stack as="ul" gap={16} divided>
-                      {group.offers.map((offer, i) => (
-                        <li key={i}>
-                          <Stack gap={8}>
-                            <div class="gmc-actions">
-                              <Pill tone={offer.tone}>{offer.text}</Pill>
-                              <span>{offer.title}</span>
-                            </div>
-                            {offer.issues.length > 0 && <OfferIssues issues={offer.issues} />}
-                          </Stack>
-                        </li>
-                      ))}
+        <style>{'.gmc-google-status details[open] > summary { margin-bottom: 12px; }'}</style>
+        <div class="gmc-google-status" style={{ overflowWrap: 'anywhere' }}>
+          <Stack gap={16}>
+            <Stack gap={8}>
+              <div class="gmc-actions">
+                <Pill tone={model.headline.tone}>{model.headline.text}</Pill>
+                {model.checked && <span class="gmc-muted">{model.checked}</span>}
+              </div>
+              {model.summaries.length > 0 && (
+                <Stack as="ul" gap={4}>
+                  {model.summaries.map((summary) => (
+                    <li key={summary.heading}>
+                      {summary.heading} — <Pill tone={summary.tone}>{summary.text}</Pill>
+                    </li>
+                  ))}
+                </Stack>
+              )}
+              {model.hidden && <span class="gmc-muted">{model.hidden}</span>}
+            </Stack>
+            {model.refusal && <Notice tone="bad">{model.refusal}</Notice>}
+            {model.note && <span class="gmc-muted">{model.note}</span>}
+            {hasDetails && (
+              <details>
+                <summary>Details</summary>
+                <Stack gap={16}>
+                  {model.markets.map((group) => (
+                    <Stack key={group.market} gap={8}>
+                      <strong>{group.heading}</strong>
+                      <Stack as="ul" gap={16} divided>
+                        {group.offers.map((offer, i) => (
+                          <li key={i}>
+                            <Stack gap={8}>
+                              <div class="gmc-actions">
+                                <Pill tone={offer.tone}>{offer.text}</Pill>
+                                <span>{offer.title}</span>
+                              </div>
+                              {offer.issues.length > 0 && <OfferIssues issues={offer.issues} />}
+                            </Stack>
+                          </li>
+                        ))}
+                      </Stack>
                     </Stack>
-                  </Stack>
-                ))}
-                {model.issues.length > 0 && <Issues issues={model.issues} />}
-              </Stack>
-            </details>
-          )}
-          {error && <Notice tone="bad">{error}</Notice>}
-          {queued && <Notice tone="ok">Queued. Google gets it within a minute.</Notice>}
-          {model.lastSent && <span class="gmc-muted">{model.lastSent}</span>}
-          {model.canResend && (
-            <div class="gmc-actions">
-              <Button kind="secondary" disabled={busy} onClick={resend}>
-                {busy ? 'Queuing…' : 'Resend now'}
-              </Button>
-            </div>
-          )}
-        </Stack>
+                  ))}
+                  {model.issues.length > 0 && <Issues issues={model.issues} />}
+                </Stack>
+              </details>
+            )}
+            {error && <Notice tone="bad">{error}</Notice>}
+            {queued && <Notice tone="ok">Queued. Google gets it within a minute.</Notice>}
+            {model.lastSent && <span class="gmc-muted">{model.lastSent}</span>}
+            {model.canResend && (
+              <div class="gmc-actions">
+                <Button kind="secondary" disabled={busy} onClick={resend}>
+                  {busy ? 'Queuing…' : 'Resend now'}
+                </Button>
+              </div>
+            )}
+          </Stack>
+        </div>
       </Card>
     </Root>
   );
