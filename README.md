@@ -12,28 +12,28 @@ The app connects a Swell store to one Google Merchant Center account. Every acti
 
 Connects the store to one Merchant Center account through the merchant's own Google Cloud service account. Pick the country you sell to when you connect; its language and currency are set from it. The **Product link** is the address shoppers land on from Google, built from the product's slug or ID (a variant link can use the variant ID). **Check again** runs Google's checks (key, access token, API registration, account access, website) and shows what is wrong, next to the setup step it belongs to. **Disconnect** stops sending and forgets the key, and can also remove the products this store sent to Google. If Google stops accepting the connection, the store admins get one email.
 
-- **Where you see it:** the app's **Connection** page (under **Apps** in your Swell dashboard), and the email "Google Merchant Center is disconnected".
+- **Where you see it:** **Apps → Google Merchant Center → Settings** (Connection section), and the email "Google Merchant Center is disconnected".
 - **Built with:** the `GoogleConnect` component and the `connection` route function; the key and the cached access token in the app collection `connections` (private fields); the country in `markets`; the `connection-broken` notification.
 
 ### Catalog sync
 
 Active products and their active variants are sent to Google in batches: one offer per variant, or one per product when it has no variants. A product is left out when it is inactive, hidden from Google, a gift card or subscription-only. Variants are judged one by one: a variant without a price or an image is skipped on its own, and a product is left out only when none of its variants qualify. Changes to a product, a variant or the stock are queued and sent within minutes. **Sync all** sends the whole catalog again, with progress. The app respects Google's daily limit, pauses when it is reached and resumes by itself.
 
-- **Where you see it:** the app's **Overview** page (progress, queue, **Sync all**).
+- **Where you see it:** **Apps → Google Merchant Center → Settings** (Overview section: progress, queue, **Sync all**).
 - **Built with:** `enqueue` (`product.created`, `.updated`, `.deleted`, the same for variants, and `product.stock_adjusted`), `courier` (runs at an alarm time, sends in batches), `hourly` (cron, every hour: starts due status checks and keeps the courier going), the app collections `queue-items`, `sync-states`, `alarms` and `markets`; the `sync` route function.
 
 ### Statuses
 
 Google reviews each offer. The app reads the result back and counts products as **Approved**, **Partly approved**, **Pending**, **Disapproved**, **Not sent** or **Hidden**. **Top issues** lists what Google reports most often, with a severity, the number of products and a few examples, and a link to Google's help. Statuses are checked roughly every hour; **Refresh statuses** checks them now. A product page shows the same status for that product.
 
-- **Where you see it:** the **Overview** page (counters, **Top issues**, **Refresh statuses**), a **Google** column in the product list, and the status panel on the product's **Google** tab.
+- **Where you see it:** **Apps → Google Merchant Center → Settings** (Overview section: counters, **Top issues**, **Refresh statuses**), a **Google** column in the product list, and the status panel on the product's **Google** tab.
 - **Built with:** the `SyncDashboard` and `GoogleStatus` components, the `sync` and `product` route functions, the product fields `status_label` and `date_status`.
 
 ### Account reasons
 
 Sometimes Google holds every product because of the account, not the products: the website is not verified, shipping is not set up, a policy needs attention. The app reads these reasons from Merchant Center and shows them with what to do and a link to the fix. They explain why products wait in **Pending**.
 
-- **Where you see it:** the "Google is not showing your products yet" card on the **Overview** page, and a line on pending products' **Google** tab.
+- **Where you see it:** the "Google is not showing your products yet" card in **Apps → Google Merchant Center → Settings** (Overview section), and a line on pending products' **Google** tab.
 - **Built with:** the `SyncDashboard` and `GoogleStatus` components; the `sync` and `product` route functions.
 
 ### The Google tab on products
@@ -68,11 +68,11 @@ Every product has a **Google** tab. All of it is optional; the app sends what it
 
 The app talks to Merchant Center through a service account: a robot Google account that you create in your own Google Cloud project. Its key stays in your store.
 
-Open the app's **Connection** page (under **Apps** in your Swell dashboard). The page shows the same four steps with links.
+Open **Apps → Google Merchant Center → Settings** (Connection section) in your Swell dashboard. It shows the same four steps with links.
 
 1. **Google Cloud project.** Create a project and enable the **Merchant API** in it.
 2. **Service account key.** In the project, create a service account and add a JSON key under **Keys**. Drop the JSON file on the page, or paste its text.
-3. **Merchant Center access.** In Merchant Center, verify and claim your website (**Settings → Business info → Website**). The page shows the service account's email, with a **Copy** button. Add it in **Settings → People and access** with **Admin** access. Set up shipping in **Products & store → Shipping and returns**; without it Google disapproves every product.
+3. **Merchant Center access.** In Merchant Center, verify and claim your website (**Settings → Business info → Website**). The Connection section shows the service account's email, with a **Copy** button. Add it in **Settings → People and access** with **Admin** access. Set up shipping in **Products & store → Shipping and returns**; without it Google disapproves every product.
 4. **Connect.** Enter your **Merchant Center account ID**, choose the **Country you sell to**, check the **Product link**, and press **Connect**. The app checks everything with Google, and each step turns green or shows what to fix. When all checks pass, the catalog starts to sync.
 
 ### Settings
@@ -90,7 +90,7 @@ Open the app's **Connection** page (under **Apps** in your Swell dashboard). The
 - **Nothing to do for new products and changes.** They are queued and sent on their own.
 - **Fill in the Google tab** for products Google disapproves: most often a brand, barcodes, or the details in **Google needs**.
 - **Hide what you do not want listed** with **Hide from Google**.
-- **Check the Overview page now and then.** The account card says what Merchant Center needs from you; **Top issues** says what Google found in the products.
+- **Look in now and then** at **Apps → Google Merchant Center → Settings** (Overview section). The account card says what Merchant Center needs from you; **Top issues** says what Google found in the products.
 - **Sync all** after changes made outside Swell or when Google lost products. **Refresh statuses** to see Google's latest verdict.
 
 ---
@@ -106,7 +106,7 @@ Open the app's **Connection** page (under **Apps** in your Swell dashboard). The
 
 **Rate limits**
 
-- Google has a daily limit on calls. When it is reached, the Overview page says when syncing resumes.
+- Google has a daily limit on calls. When it is reached, **Apps → Google Merchant Center → Settings** (Overview section) says when syncing resumes.
 - Statuses are checked roughly every hour, so a fix can take that long to show.
 
 **Environments**
@@ -126,4 +126,4 @@ swell app push           # deploy to the store
 ```
 
 
-**Where things are:** `functions/` (route functions, event and cron entry points, shared code in `functions/lib/`), `components/` (the Connection page, the Overview page and the product tab components), `models/` (app collections), `content/` (the product view), `settings/`, `notifications/`, `test/unit/`, `assets/` (icon and screenshots).
+**Where things are:** `functions/` (route functions, event and cron entry points, shared code in `functions/lib/`), `components/` (the Connection and Overview sections of the app's Settings, and the product tab components), `models/` (app collections), `content/` (the product view), `settings/`, `notifications/`, `test/unit/`, `assets/` (icon and screenshots).

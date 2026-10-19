@@ -4,7 +4,7 @@ List your products in Google Shopping and free listings, and keep them current. 
 
 ## Connect step by step
 
-A guided page in your Swell dashboard walks you through the setup: a Google Cloud project, a service account key, access in Merchant Center, and your account ID. Each step shows whether Google accepts it, and what to fix if it does not.
+In your Swell dashboard, **Apps → Google Merchant Center → Settings** (Connection section) walks you through the setup: a Google Cloud project, a service account key, access in Merchant Center, and your account ID. Each step shows whether Google accepts it, and what to fix if it does not.
 
 ## Your catalog in Google
 
@@ -15,11 +15,11 @@ A guided page in your Swell dashboard walks you through the setup: a Google Clou
 
 ## See what Google says
 
-The Overview page shows how many products are approved, pending or disapproved, the issues Google reports most often, and when the statuses were last checked. Each product has the same status on its own page.
+**Apps → Google Merchant Center → Settings** (Overview section) shows how many products are approved, pending or disapproved, the issues Google reports most often, and when the statuses were last checked. Each product has the same status on its own page.
 
 ## Know why Google holds your products
 
-When the account itself is the problem, such as an unverified website or missing shipping settings, the Overview page says so, with what to do and a link to the fix. Products waiting for that stay in Pending until you do it.
+When the account itself is the problem, such as an unverified website or missing shipping settings, **Apps → Google Merchant Center → Settings** (Overview section) says so, with what to do and a link to the fix. Products waiting for that stay in Pending until you do it.
 
 ## A Google tab on every product
 
