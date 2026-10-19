@@ -165,7 +165,7 @@ export function statusPanelModel(view: ProductStatusView, now: number): StatusPa
     lastSent: sentDay ? `Last sent to Google ${sentDay}` : null,
     markets: [...markets.values()],
     summaries: [...byMarket].map(([market, group]) => ({ heading: marketHeading(market), ...summaryOf(group) })),
-    accountNote: view.account_waiting && headlineStatus === 'pending' ? "Google waits for your account details before reviewing products. See the app's Overview." : null,
+    accountNote: view.connected && view.account_waiting && headlineStatus === 'pending' ? "Google waits for your account details before reviewing products. See the app's Overview." : null,
     hidden: excluded ? 'Turn off “Hide from Google” above to list it again.' : null,
     issues: live ? [] : (view.stored.status_issues ?? []),
     canResend: view.connected && !excluded,

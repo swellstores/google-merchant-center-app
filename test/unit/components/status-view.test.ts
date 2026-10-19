@@ -182,6 +182,11 @@ describe('issueSeverity', () => {
     const live = { checked_at: '2026-10-16T12:00:00Z', more: 0, offers: [offer({ status: 'pending' })] };
     expect(statusPanelModel(view({ account_waiting: true, live }), NOW).accountNote).toBe(LINE);
   });
+
+  it('no line when not connected', () => {
+    const pending = { status: 'pending' as const, status_label: 'Pending' };
+    expect(statusPanelModel(view({ connected: false, stored: pending, account_waiting: true }), NOW).accountNote).toBeNull();
+  });
 });
 
 describe('callRoute with a query', () => {

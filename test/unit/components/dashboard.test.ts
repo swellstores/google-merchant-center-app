@@ -153,6 +153,15 @@ describe('dashboardModel', () => {
     });
   });
 
+  it('no card while broken or disconnected', () => {
+    const reasons = [{ source: 'requirement' as const, program: 'free-listings' as const, code: 'A', title: 'A', action: null, documentation: null, countries: ['US'] }];
+    const card = (status: DashboardView['connection']['status']) =>
+      dashboardModel(view({ connection: { status, merchant_id: '123', last_error: null }, account: { reasons, merchant_url: null } }), NOW).account;
+    expect(card('connected')).not.toBeNull();
+    expect(card('broken')).toBeNull();
+    expect(card('disconnected')).toBeNull();
+  });
+
   it('card edge cases: unknown country, no countries, no Merchant Center link', () => {
     const reason = { source: 'requirement' as const, program: 'free-listings' as const, code: 'A', title: 'A', action: null, documentation: null };
     const card = (countries: string[]) => dashboardModel(view({ account: { reasons: [{ ...reason, countries }], merchant_url: null } }), NOW).account;

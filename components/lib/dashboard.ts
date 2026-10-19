@@ -87,8 +87,9 @@ export const issueKey = (issue: { code: string; attribute?: string }) => `${issu
 const COUNTRY_NAMES = new Map(COUNTRIES);
 const PROGRAMS: Record<NonNullable<AccountReason['program']>, string> = { 'free-listings': 'Free listings', 'shopping-ads': 'Shopping ads' };
 
-function accountOf({ account }: DashboardView): DashboardModel['account'] {
-  if (account.reasons.length === 0) return null;
+function accountOf({ account, connection }: DashboardView): DashboardModel['account'] {
+  // The reasons are from the last check; a connection that is not working says more.
+  if (connection.status !== 'connected' || account.reasons.length === 0) return null;
   return {
     title: 'Google is not showing your products yet',
     lead: 'Merchant Center needs a few things from you. Products wait in “Pending” until then.',
