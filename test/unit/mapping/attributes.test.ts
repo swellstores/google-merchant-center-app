@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { googleAttribute, neededAttributes, needsAttributes, variantAttributes, variantOptions } from '../../../functions/lib/mapping/attributes';
+import { googleAttribute, neededAttributes, showsAttributes, variantAttributes, variantOptions } from '../../../functions/lib/mapping/attributes';
 import type { SwellOption, SwellProduct, SwellVariant } from '../../../functions/lib/mapping/types';
 import type { StatusIssue } from '../../../functions/lib/status/product-status';
 
@@ -35,12 +35,27 @@ describe('neededAttributes', () => {
   });
 });
 
-describe('needsAttributes', () => {
-  it('is true for a needed attribute or a non-null choice', () => {
-    expect(needsAttributes([issue('size')], null)).toBe(true);
-    expect(needsAttributes([], { color: 'o1' })).toBe(true);
-    expect(needsAttributes([], { color: null })).toBe(false);
-    expect(needsAttributes([issue('brand')], undefined)).toBe(false);
+describe('showsAttributes', () => {
+  const withOptions: SwellProduct = { id: 'p', options: [{ id: 'o1', name: 'Size', variant: true, values: [] }] };
+  const withoutOptions: SwellProduct = { id: 'p', options: [{ id: 'o2', name: 'Gift note', variant: false, values: [] }] };
+
+  it('is true for a product with variant options, with no issue and no choice', () => {
+    expect(showsAttributes(withOptions, [], null)).toBe(true);
+  });
+
+  it('is false without variant options, an issue the tab provides or a choice', () => {
+    expect(showsAttributes(withoutOptions, [], null)).toBe(false);
+    expect(showsAttributes({ id: 'p', options: null }, [issue('brand')], { color: null })).toBe(false);
+    expect(showsAttributes(undefined, [], undefined)).toBe(false);
+  });
+
+  it('is true without variant options while Google asks for an attribute the tab provides', () => {
+    expect(showsAttributes(withoutOptions, [issue('size')], null)).toBe(true);
+    expect(showsAttributes(undefined, [issue('age_group')], null)).toBe(true);
+  });
+
+  it('is true without variant options for a stored choice', () => {
+    expect(showsAttributes(withoutOptions, [], { color: 'o1' })).toBe(true);
   });
 });
 

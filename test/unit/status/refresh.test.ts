@@ -104,7 +104,7 @@ describe('status refresh pass', () => {
     const { env, swell, collections } = setup(products, { statuses: { [offerOf(1)]: approved(), [offerOf(2)]: approved() } });
     const pass = await statusRefreshPass(env, newStatusRefreshJob(NOW));
     const puts = productPuts(swell);
-    expect(puts).toEqual([{ method: 'put', url: `/products/${idOf(1)}`, data: { $app: { [APP_ID]: statusFields(statusOf(1, approved()), NOW) } } }]);
+    expect(puts).toEqual([{ method: 'put', url: `/products/${idOf(1)}`, data: { $app: { [APP_ID]: statusFields(statusOf(1, approved()), NOW, false) } } }]);
     expect(fieldsOf(collections, 1)).toMatchObject({ status: 'approved', status_label: 'Approved', status_issues: [], date_status: iso(NOW) });
     expect(pass.job).toMatchObject({ checked: 2, requeued: 0, counters: { approved: 2, pending: 0 } });
   });
@@ -112,7 +112,7 @@ describe('status refresh pass', () => {
   it('a stored choice makes the written marker true', async () => {
     const { env, swell } = setup([product(1, 1, { attribute_options: { size: 'o1' } })], { statuses: { [offerOf(1)]: approved() } });
     await statusRefreshPass(env, newStatusRefreshJob(NOW));
-    expect(productPuts(swell)[0].data).toEqual({ $app: { [APP_ID]: statusFields(statusOf(1, approved()), NOW, { size: 'o1' }) } });
+    expect(productPuts(swell)[0].data).toEqual({ $app: { [APP_ID]: statusFields(statusOf(1, approved()), NOW, true) } });
     expect((productPuts(swell)[0].data as any).$app[APP_ID].needs_attributes).toBe(true);
   });
 
@@ -123,6 +123,20 @@ describe('status refresh pass', () => {
     const puts = productPuts(swell);
     expect(puts).toHaveLength(1);
     expect((puts[0].data as any).$app[APP_ID].needs_attributes).toBe(false);
+  });
+
+  it('writes the marker when the product gained variant options, and leaves it once written', async () => {
+    const same = statusOf(1, approved());
+    const options = [{ id: 'o1', name: 'Size', variant: true, values: [{ id: 'a', name: 'M' }] }];
+    const gained = setup([{ ...product(1, 1, storedStatus(same)), options }], { statuses: { [offerOf(1)]: approved() } });
+    await statusRefreshPass(gained.env, newStatusRefreshJob(NOW));
+    const puts = productPuts(gained.swell);
+    expect(puts).toHaveLength(1);
+    expect((puts[0].data as any).$app[APP_ID].needs_attributes).toBe(true);
+
+    const marked = setup([{ ...product(1, 1, { ...storedStatus(same), needs_attributes: true }), options }], { statuses: { [offerOf(1)]: approved() } });
+    await statusRefreshPass(marked.env, newStatusRefreshJob(NOW));
+    expect(productPuts(marked.swell)).toEqual([]);
   });
 
   it('one Google batch of at most 100 offers, the page cut at a product', async () => {

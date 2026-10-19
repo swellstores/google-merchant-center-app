@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { showsAttributes } from '../../../functions/lib/mapping/attributes';
 import {
   earliestExpiry,
   offerStatus,
@@ -172,7 +173,7 @@ const approvedStatus = () => productStatus([approved('a')]);
 describe('statusFields', () => {
   it('replaces the issue list inside the app object', () => {
     const status = productStatus([disapproved('a', [{ code: 'c', severity: 'DISAPPROVED', description: 'c' }])]);
-    expect(statusFields(status, Date.parse('2026-10-16T10:00:00Z'))).toEqual({
+    expect(statusFields(status, Date.parse('2026-10-16T10:00:00Z'), false)).toEqual({
       status: 'disapproved',
       status_label: 'Disapproved',
       status_hash: status.hash,
@@ -186,19 +187,15 @@ describe('statusFields', () => {
     productStatus([disapproved('a', [{ code: 'missing_attribute', severity: 'DISAPPROVED', description: 'm', attribute }])]);
   const at = Date.parse('2026-10-16T10:00:00Z');
 
-  it('needs_attributes is true while Google names an attribute the tab can provide', () => {
-    expect(statusFields(missing('size'), at).needs_attributes).toBe(true);
-    expect(statusFields(missing('age group'), at).needs_attributes).toBe(true);
-    expect(statusFields(missing('brand'), at).needs_attributes).toBe(false);
+  it('writes the marker it is given', () => {
+    expect(statusFields(approvedStatus(), at, true).needs_attributes).toBe(true);
+    expect(statusFields(approvedStatus(), at, false).needs_attributes).toBe(false);
   });
 
-  it('needs_attributes stays true for a stored choice after Google stops asking', () => {
-    expect(statusFields(approvedStatus(), at, { color: 'opt1' }).needs_attributes).toBe(true);
-  });
-
-  it('a non-null choice cleared to null no longer counts', () => {
-    expect(statusFields(approvedStatus(), at, { color: null }).needs_attributes).toBe(false);
-    expect(statusFields(approvedStatus(), at, null).needs_attributes).toBe(false);
+  it('the marker reads an attribute Google names that the tab can provide', () => {
+    expect(showsAttributes(undefined, missing('size').issues, null)).toBe(true);
+    expect(showsAttributes(undefined, missing('age group').issues, null)).toBe(true);
+    expect(showsAttributes(undefined, missing('brand').issues, null)).toBe(false);
   });
 });
 
@@ -243,7 +240,7 @@ describe('issue attribute', () => {
     expect(status.issues).toHaveLength(10);
     // The tab cannot provide a brand, so it is cut like any other; the size keeps its place, last.
     expect(status.issues.map((i) => i.attribute ?? i.code)).toEqual(['bad_0', 'bad_10', 'bad_11', 'bad_1', 'bad_2', 'bad_3', 'bad_4', 'bad_5', 'bad_6', 'size']);
-    expect(statusFields(status, 0).needs_attributes).toBe(true);
+    expect(showsAttributes(undefined, status.issues, null)).toBe(true);
 
     const full = productStatus([disapproved('a', [...bad.slice(0, 9), demoted('size')])]);
     expect(full.issues).toHaveLength(10);

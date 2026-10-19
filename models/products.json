@@ -22,7 +22,7 @@
     "status_issues": { "type": "array", "value_type": "object" },
     "status_hash": { "type": "string" },
     "attribute_options": { "type": "object", "description": "Google attribute → variant option id" },
-    "needs_attributes": { "type": "bool", "description": "Google asks for an attribute the tab can provide (an option attribute, age group or gender), or an option is chosen: shows the Google needs block" },
+    "needs_attributes": { "type": "bool", "description": "Shows the Variant attributes block: the product has variant options, Google asks for an attribute the tab provides, or an option is chosen." },
     "date_status": { "type": "date" },
     "status_panel": { "type": "string", "description": "Not stored: hosts the GoogleStatus component" },
     "preview": { "type": "string", "description": "Not stored: hosts the ShoppingPreview component" }

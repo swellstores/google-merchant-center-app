@@ -41,8 +41,17 @@ export function neededAttributes(issues: StatusIssue[]): string[] {
   return PROVIDED.filter((attribute) => named.has(attribute));
 }
 
-export function needsAttributes(issues: StatusIssue[], chosen: AttributeOptions | null | undefined): boolean {
-  return neededAttributes(issues).length > 0 || Object.values(chosen ?? {}).some((id) => id != null);
+/** The Variant attributes block shows for variant options, an attribute Google asks for that the tab provides, or a choice. */
+export function showsAttributes(
+  product: SwellProduct | undefined,
+  issues: StatusIssue[],
+  chosen: AttributeOptions | null | undefined,
+): boolean {
+  return (
+    (product?.options ?? []).some((option) => option?.variant === true) ||
+    neededAttributes(issues).length > 0 ||
+    Object.values(chosen ?? {}).some((id) => id != null)
+  );
 }
 
 /**

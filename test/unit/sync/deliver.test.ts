@@ -153,6 +153,23 @@ describe('deliver', () => {
     expect(appFields('p1')).toMatchObject({ status: 'pending', needs_attributes: true });
   });
 
+  it('a send of a product with variant options writes the marker true, first or not', async () => {
+    const sized = (extra: Record<string, any> = {}) =>
+      mug({
+        options: [{ id: 'o1', name: 'Size', variant: true, values: [{ id: 'a', name: 'M' }] }],
+        variants: { results: [{ id: 'v1', name: 'M', active: true, option_value_ids: ['a'] }] },
+        ...extra,
+      });
+    const first = setup([sized()]);
+    await deliver(first.env, [unit('p1')]);
+    expect(first.appFields('p1')).toMatchObject({ status: 'pending', needs_attributes: true });
+
+    const stored = { status: 'approved', status_label: 'Approved', status_hash: 'x', status_issues: [], input_ids: ['en~US~v1'] };
+    const again = setup([sized({ $app: { [APP_ID]: stored } })]);
+    await deliver(again.env, [unit('p1')]);
+    expect(again.appFields('p1')).toMatchObject({ status: 'approved', needs_attributes: true });
+  });
+
   it('clearing a choice turns the marker off on the next send', async () => {
     const stored = { status: 'approved', status_label: 'Approved', status_hash: 'x', status_issues: [], attribute_options: { color: null }, needs_attributes: true };
     const { env, appFields } = setup([mug({ $app: { [APP_ID]: stored } })]);

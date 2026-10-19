@@ -1,4 +1,4 @@
-import { googleAttribute, needsAttributes, providesAttribute, type AttributeOptions } from '../mapping/attributes';
+import { googleAttribute, providesAttribute } from '../mapping/attributes';
 import type { SkipReason } from '../mapping/offers';
 import { iso } from '../time';
 
@@ -210,14 +210,14 @@ export function earliestExpiry(answers: OfferAnswer[]): number | null {
   return earliest;
 }
 
-/** The product PUT body part: plain fields plus `$set: { status_issues }`. */
-export function statusFields(status: ProductStatus, now: number, chosen?: AttributeOptions | null): Record<string, unknown> {
+/** The product PUT body part: plain fields plus `$set: { status_issues }`. `marker` comes from `showsAttributes`. */
+export function statusFields(status: ProductStatus, now: number, marker: boolean): Record<string, unknown> {
   return {
     status: status.status,
     status_label: status.label,
     status_hash: status.hash,
     date_status: iso(now),
-    needs_attributes: needsAttributes(status.issues, chosen),
+    needs_attributes: marker,
     $set: { status_issues: status.issues },
   };
 }
