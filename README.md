@@ -95,23 +95,15 @@ Open **Apps → Google Merchant Center → Settings** (Connection section) in yo
 
 ---
 
-## Limits and known issues
+## Limits
 
-**Not supported yet**
-
-- More than one market (country) per store.
-- Bulk actions on the product list. Hide and edit products one by one.
-- Searching Google's categories, or suggesting brands.
-- Subscription-only products and gift cards (they are not sent).
-
-**Rate limits**
-
-- Google has a daily limit on calls. When it is reached, **Apps → Google Merchant Center → Settings** (Overview section) says when syncing resumes.
-- Statuses are checked roughly every hour, so a fix can take that long to show.
-
-**Environments**
-
-- Each Swell environment (test and live) has its own connection and settings.
+- **One market per store:** the catalog goes to one country and language.
+- **Per-product settings:** hiding and the Google tab are set on each product.
+- **Categories:** set by number or full path from Google's product taxonomy.
+- **Not sent:** subscription-only products and gift cards.
+- **Google's daily call limit:** when it is reached, syncing pauses and **Apps → Google Merchant Center → Settings** (Overview section) says when it resumes.
+- **Status checks:** about every hour, so a fix can take that long to show.
+- **Environments:** test and live each have their own connection and settings.
 
 ---
 
