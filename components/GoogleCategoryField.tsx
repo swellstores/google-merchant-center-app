@@ -21,7 +21,7 @@ export default function GoogleCategoryField(props: ComponentProps) {
           aria-label="Google product category"
           placeholder="e.g. 1604 or Apparel & Accessories > Clothing > Shirts & Tops"
           value={categoryText(props.value)}
-          disabled={Boolean(props.readonly)}
+          readOnly={Boolean(props.readonly)}
           onInput={(e) => props.setValue(categoryValue((e.currentTarget as HTMLInputElement).value))}
         />
         <ExternalLink href={CATEGORY_LIST_URL}>Find your category</ExternalLink>
