@@ -1,14 +1,13 @@
 import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
-import { latestWins, suggestions } from './lib/brand-input';
+import { latestWins, nextActive, suggestions } from './lib/brand-input';
 import { Root } from './lib/ui';
 
 export const config = { description: 'A brand field that suggests the brands already used in the store' };
 
 const CSS = `
-.gmc-brand { position: relative; }
-.gmc-brand-list { position: absolute; z-index: 10; left: 0; right: 0; top: 100%; margin: 4px 0 0; padding: 4px; list-style: none; max-height: 240px; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0, 0, 0, .15); }
+.gmc-brand-list { margin: 4px 0 0; padding: 4px; list-style: none; max-height: 240px; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
 .gmc-brand-list li { padding: 6px 8px; border-radius: 4px; cursor: pointer; }
 .gmc-brand-list li[aria-selected="true"] { background: var(--subtle); }
 `;
@@ -43,12 +42,12 @@ export default function BrandInput(props: ComponentProps) {
   function onKeyDown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
       setOpen(false);
+      setActive(-1);
     } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       if (!shown.length) return;
       e.preventDefault();
       setOpen(true);
-      const step = e.key === 'ArrowDown' ? 1 : -1;
-      setActive((active + step + shown.length) % shown.length);
+      setActive(nextActive(active, shown.length, e.key));
     } else if (e.key === 'Enter' && listed && shown[active]) {
       e.preventDefault();
       pick(shown[active]);
@@ -64,6 +63,7 @@ export default function BrandInput(props: ComponentProps) {
           role="combobox"
           aria-expanded={listed}
           aria-autocomplete="list"
+          aria-activedescendant={listed && active >= 0 ? `gmc-brand-opt-${active}` : undefined}
           autoComplete="off"
           value={text}
           disabled={Boolean(props.readonly)}
@@ -79,7 +79,16 @@ export default function BrandInput(props: ComponentProps) {
         {listed && (
           <ul class="gmc-brand-list" role="listbox">
             {shown.map((brand, i) => (
-              <li key={brand} role="option" aria-selected={i === active} onMouseDown={(e) => { e.preventDefault(); pick(brand); }} onClick={() => pick(brand)}>
+              <li
+                key={brand}
+                id={`gmc-brand-opt-${i}`}
+                role="option"
+                aria-selected={i === active}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(brand);
+                }}
+              >
                 {brand}
               </li>
             ))}

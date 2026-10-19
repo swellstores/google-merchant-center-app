@@ -22,3 +22,9 @@ export function latestWins() {
     },
   };
 }
+
+/** The highlighted row after an arrow key; with no row highlighted (-1) Down takes the first and Up the last. */
+export function nextActive(active: number, count: number, key: 'ArrowDown' | 'ArrowUp'): number {
+  if (active < 0) return key === 'ArrowDown' ? 0 : count - 1;
+  return (active + (key === 'ArrowDown' ? 1 : -1) + count) % count;
+}

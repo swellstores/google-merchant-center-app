@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { latestWins, suggestions } from '../../../components/lib/brand-input';
+import { latestWins, nextActive, suggestions } from '../../../components/lib/brand-input';
 
 const ALL = ['Adidas', 'Nike', 'Nikon', 'Puma', 'Unikorn', 'Banana Nike'];
 
@@ -49,5 +49,19 @@ describe('latestWins', () => {
     const applied: string[] = [];
     w.accept(w.start(), () => applied.push('a'));
     expect(applied).toEqual(['a']);
+  });
+});
+
+describe('nextActive', () => {
+  it('arrows start from the first or the last suggestion', () => {
+    expect(nextActive(-1, 4, 'ArrowDown')).toBe(0);
+    expect(nextActive(-1, 4, 'ArrowUp')).toBe(3);
+  });
+
+  it('wraps around the ends', () => {
+    expect(nextActive(3, 4, 'ArrowDown')).toBe(0);
+    expect(nextActive(0, 4, 'ArrowUp')).toBe(3);
+    expect(nextActive(1, 4, 'ArrowDown')).toBe(2);
+    expect(nextActive(2, 4, 'ArrowUp')).toBe(1);
   });
 });
