@@ -258,7 +258,7 @@ export async function statusRefreshPass(
       const resend = resendDue(offers, fields, now);
       const ops: BatchOp[] = [];
       if (status.hash !== fields.status_hash) {
-        ops.push({ method: 'put', url: `/products/${product.id}`, data: { $app: { [appId]: statusFields(status, now) } } });
+        ops.push({ method: 'put', url: `/products/${product.id}`, data: { $app: { [appId]: statusFields(status, now, fields.attribute_options) } } });
       }
       if (resend) ops.push(enqueueWrite(undefined, { productId: product.id, kind: 'full' }));
       if (writes.length + ops.length > cap) break;

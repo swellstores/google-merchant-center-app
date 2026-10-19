@@ -1,3 +1,4 @@
+import type { AttributeOptions } from './attributes';
 import type { StatusIssue, StatusValue } from '../status/product-status';
 
 export interface SwellImage {
@@ -48,6 +49,9 @@ export interface GoogleFields {
   status_issues?: StatusIssue[];
   status_hash?: string | null;
   date_status?: string | null;
+  /** Google attribute → variant option id. A cleared choice is stored as null. */
+  attribute_options?: AttributeOptions | null;
+  needs_attributes?: boolean;
 }
 
 export interface SwellProduct {

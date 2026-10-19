@@ -166,6 +166,8 @@ describe('earliestExpiry', () => {
   });
 });
 
+const approvedStatus = () => productStatus([approved('a')]);
+
 describe('statusFields', () => {
   it('replaces the issue list inside the app object', () => {
     const status = productStatus([disapproved('a', [{ code: 'c', severity: 'DISAPPROVED', description: 'c' }])]);
@@ -174,8 +176,28 @@ describe('statusFields', () => {
       status_label: 'Disapproved',
       status_hash: status.hash,
       date_status: '2026-10-16T10:00:00.000Z',
+      needs_attributes: false,
       $set: { status_issues: status.issues },
     });
+  });
+
+  const missing = (attribute: string) =>
+    productStatus([disapproved('a', [{ code: 'missing_attribute', severity: 'DISAPPROVED', description: 'm', attribute }])]);
+  const at = Date.parse('2026-10-16T10:00:00Z');
+
+  it('needs_attributes is true while Google names an option attribute', () => {
+    expect(statusFields(missing('size'), at).needs_attributes).toBe(true);
+    expect(statusFields(missing('age group'), at).needs_attributes).toBe(true);
+    expect(statusFields(missing('brand'), at).needs_attributes).toBe(false);
+  });
+
+  it('needs_attributes stays true for a stored choice after Google stops asking', () => {
+    expect(statusFields(approvedStatus(), at, { color: 'opt1' }).needs_attributes).toBe(true);
+  });
+
+  it('a non-null choice cleared to null no longer counts', () => {
+    expect(statusFields(approvedStatus(), at, { color: null }).needs_attributes).toBe(false);
+    expect(statusFields(approvedStatus(), at, null).needs_attributes).toBe(false);
   });
 });
 
@@ -192,5 +214,30 @@ describe('refusedStatus', () => {
   it('caps the offers at 20', () => {
     const ids = Array.from({ length: 25 }, (_, i) => `o${i}`);
     expect(refusedStatus('x', ids).issues[0].offers).toHaveLength(20);
+  });
+});
+
+describe('issue attribute', () => {
+  const issue = (attribute?: string) => ({ code: 'missing_attribute', severity: 'DISAPPROVED', description: 'm', attribute });
+
+  it('color and size under one code are two issues', () => {
+    const status = productStatus([disapproved('a', [issue('color'), issue('size')])]);
+    expect(status.issues.map((i) => i.attribute).sort()).toEqual(['color', 'size']);
+  });
+
+  it('the attribute is normalised', () => {
+    expect(productStatus([disapproved('a', [issue('age group')])]).issues[0].attribute).toBe('age_group');
+  });
+
+  it('the attribute is part of the status hash', () => {
+    const hash = (attribute?: string) => productStatus([disapproved('a', [issue(attribute)])]).hash;
+    expect(hash('color')).not.toBe(hash('size'));
+    expect(hash('color')).not.toBe(hash());
+  });
+
+  it('an issue without an attribute keeps its old hash', () => {
+    const status = productStatus([disapproved('a', [{ code: 'c', severity: 'DISAPPROVED', description: 'c', applicableCountries: ['US'] }])]);
+    expect(status.hash).toBe('77831552');
+    expect(status.issues[0]).not.toHaveProperty('attribute');
   });
 });

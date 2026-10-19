@@ -1,3 +1,4 @@
+import { googleAttribute, needsAttributes, type AttributeOptions } from '../mapping/attributes';
 import type { SkipReason } from '../mapping/offers';
 import { iso } from '../time';
 
@@ -33,6 +34,8 @@ export interface StatusIssue {
   description: string;
   detail?: string;
   documentation?: string;
+  /** Google's attribute for the issue, normalised by `googleAttribute` */
+  attribute?: string;
   offers: string[];
   countries: string[];
 }
@@ -88,18 +91,21 @@ function severityOf(google: string | undefined, resolution: string | undefined):
   return 'info';
 }
 
-const byCode = (a: StatusIssue, b: StatusIssue) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0);
+const keyOf = (issue: StatusIssue) => `${issue.code}|${issue.attribute ?? ''}`;
+const byCode = (a: StatusIssue, b: StatusIssue) => (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : 0);
 
 /** `missing: false` leaves out the issue of offers Google does not hold, for a product just sent. */
 export function groupIssues(answers: OfferAnswer[], missing = true): StatusIssue[] {
   const groups = new Map<string, StatusIssue>();
   const add = (code: string, severity: StatusIssue['severity'], inputId: string, countries: string[], from: Partial<StatusIssue>) => {
-    let issue = groups.get(code);
+    const key = `${code}|${from.attribute ?? ''}`;
+    let issue = groups.get(key);
     if (!issue) {
       issue = { code, severity, description: from.description ?? code, offers: [], countries: [] };
+      if (from.attribute) issue.attribute = from.attribute;
       if (from.detail) issue.detail = from.detail;
       if (from.documentation) issue.documentation = from.documentation;
-      groups.set(code, issue);
+      groups.set(key, issue);
     }
     if (SEVERITY_ORDER[severity] < SEVERITY_ORDER[issue.severity]) issue.severity = severity;
     if (!issue.offers.includes(inputId)) issue.offers.push(inputId);
@@ -120,6 +126,7 @@ export function groupIssues(answers: OfferAnswer[], missing = true): StatusIssue
         description: item.description,
         detail: item.detail,
         documentation: item.documentation,
+        attribute: googleAttribute(item.attribute) ?? undefined,
       });
     }
   }
@@ -142,7 +149,10 @@ function fnv1a(text: string): string {
 }
 
 function build(status: StatusValue, label: string, issues: StatusIssue[]): ProductStatus {
-  const digest = JSON.stringify([status, label, issues.map((i) => [i.code, i.severity, [...i.offers].sort(), i.countries])]);
+  const digest = JSON.stringify([status, label, issues.map((i) => {
+    const row = [i.code, i.severity, [...i.offers].sort(), i.countries];
+    return i.attribute ? [...row, i.attribute] : row;
+  })]);
   return { status, label, issues, hash: fnv1a(digest) };
 }
 
@@ -192,12 +202,13 @@ export function earliestExpiry(answers: OfferAnswer[]): number | null {
 }
 
 /** The product PUT body part: plain fields plus `$set: { status_issues }`. */
-export function statusFields(status: ProductStatus, now: number): Record<string, unknown> {
+export function statusFields(status: ProductStatus, now: number, chosen?: AttributeOptions | null): Record<string, unknown> {
   return {
     status: status.status,
     status_label: status.label,
     status_hash: status.hash,
     date_status: iso(now),
+    needs_attributes: needsAttributes(status.issues, chosen),
     $set: { status_issues: status.issues },
   };
 }

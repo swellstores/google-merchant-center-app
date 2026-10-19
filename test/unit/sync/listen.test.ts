@@ -37,6 +37,12 @@ describe('planFromEvent', () => {
     expect(planFromEvent(APP, ev('product.updated', data), { id: 'p1' })).toBeNull();
   });
 
+  it('needs_attributes changing does not queue the product', () => {
+    const write = (fields: Record<string, unknown>) => planFromEvent(APP, ev('product.updated', { $app: { [APP]: fields } }), { id: 'p1' });
+    expect(write({ needs_attributes: true })).toBeNull();
+    expect(write({ attribute_options: { color: 'o1' } })).toEqual({ productId: 'p1', kind: 'full' });
+  });
+
   it('writes of the panel fields do not queue the product', () => {
     const write = (fields: Record<string, unknown>) => planFromEvent(APP, ev('product.updated', { $app: { [APP]: fields } }), { id: 'p1' });
     expect(write({ status_panel: null })).toBeNull();

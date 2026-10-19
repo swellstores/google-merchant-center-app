@@ -286,7 +286,7 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[], read?: Map<st
     if (plan.product && settled.fields) {
       // `$set` inside the app's object replaces the list; any other form merges it by position.
       const { input_ids, ...fields } = settled.fields;
-      const status = settled.status ? statusFields(settled.status, env.ctx.now()) : {};
+      const status = settled.status ? statusFields(settled.status, env.ctx.now(), (plan.product.$app?.[env.ctx.appId] as GoogleFields | undefined)?.attribute_options) : {};
       const { $set: statusSet, ...statusPlain } = status as { $set?: Record<string, unknown> };
       const app = { ...fields, ...statusPlain, $set: { input_ids, ...statusSet } };
       env.outbox.add({ method: 'put', url: `/products/${plan.product.id}`, data: { $app: { [env.ctx.appId]: app } } });

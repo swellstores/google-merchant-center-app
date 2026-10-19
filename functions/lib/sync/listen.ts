@@ -12,7 +12,7 @@ const LIGHT_FIELDS = new Set(['price', 'sale', 'sale_price', 'purchase_options',
 export const SYSTEM_FIELDS = new Set([
   'sync_state', 'sync_reason', 'sync_error', 'date_synced', 'input_ids',
   'status', 'status_label', 'status_issues', 'status_hash', 'date_status',
-  'status_panel', 'preview',
+  'status_panel', 'preview', 'needs_attributes',
 ]);
 
 export interface EventPlan {

@@ -11,6 +11,7 @@ export interface StatusIssue {
   description: string;
   detail?: string;
   documentation?: string;
+  attribute?: string;
   offers: string[];
   countries: string[];
 }

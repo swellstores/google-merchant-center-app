@@ -21,6 +21,8 @@
     "status_label": { "type": "string" },
     "status_issues": { "type": "array", "value_type": "object" },
     "status_hash": { "type": "string" },
+    "attribute_options": { "type": "object", "description": "Google attribute → variant option id" },
+    "needs_attributes": { "type": "bool", "description": "Google asks for a variant option attribute, or one is chosen: shows the Google needs block" },
     "date_status": { "type": "date" },
     "status_panel": { "type": "string", "description": "Not stored: hosts the GoogleStatus component" },
     "preview": { "type": "string", "description": "Not stored: hosts the ShoppingPreview component" }
