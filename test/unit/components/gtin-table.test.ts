@@ -95,6 +95,20 @@ describe('gtinTableModel', () => {
     expect(model.rows[0].label).toBe('This product');
   });
 
+  it.each([
+    ['a mix of active, inactive and archived variants', VARIANTS, 'All variants'],
+    ['only inactive variants', [{ id: 'v4', name: 'Off', active: false }, { id: 'v5', name: 'Off too', active: false }], 'All variants'],
+    ['no variants', [], 'This product'],
+  ])('the table’s variant rows match the units buildOffers sends: %s', (_, variants, firstLabel) => {
+    const product: SwellProduct = { id: PID, active: true, price: 10, images: [{ file: { url: 'https://cdn.example.com/a.jpg' } }], variants: { results: variants } };
+    const model = gtinTableModel(product, null, APP);
+    const sentVariants = buildOffers(product, [MARKET], OPTS)
+      .offers.filter((offer) => offer.input.productAttributes.itemGroupId)
+      .map((offer) => offer.input.offerId);
+    expect(model.rows[0].label).toBe(firstLabel);
+    expect(model.rows.filter((row) => row.key !== 'product').map((row) => row.key)).toEqual(sentVariants);
+  });
+
   it('builds the variant rows from the full list once it is loaded', () => {
     const record = { variants: { count: 30, results: [VARIANTS[0], VARIANTS[1]] } };
     const all = [...VARIANTS, ...Array.from({ length: 26 }, (_, i) => ({ id: `w${i}`, name: `W${i}`, active: true }))];

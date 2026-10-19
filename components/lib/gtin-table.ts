@@ -27,9 +27,8 @@ export interface VariantList {
 
 const SHARED = 'product';
 
-function liveVariants(variants: unknown): SwellVariant[] {
-  const list: SwellVariant[] = Array.isArray(variants) ? variants : ((variants as { results?: SwellVariant[] } | null | undefined)?.results ?? []);
-  return list.filter((v) => v.active !== false && !v.archived);
+function variantsOf(variants: unknown): SwellVariant[] {
+  return Array.isArray(variants) ? variants : ((variants as { results?: SwellVariant[] } | null | undefined)?.results ?? []);
 }
 
 /**
@@ -67,14 +66,16 @@ export function gtinTableModel(
 ): GtinTableModel {
   const fields = record.$app?.[appId] ?? {};
   const disabled = fields.identifier_exists === false;
-  const variants = liveVariants(allVariants?.length ? allVariants : record.variants);
+  // As the mapping decides: any variant, live or not, means the product sells its live variants only.
+  const all = variantsOf(allVariants?.length ? allVariants : record.variants);
+  const variants = all.filter((v) => v.active !== false && !v.archived);
   const shared = value?.[SHARED];
   // The legacy top-level MPN stands in for the shared one until the shared row is first written (or cleared to null).
   const legacyApplies = !(value && SHARED in value);
   const legacyMpn: string = typeof fields.mpn === 'string' ? fields.mpn : '';
   const sharedMpn = legacyApplies ? legacyMpn : (shared?.mpn ?? '');
 
-  const rows: GtinRow[] = variants.length
+  const rows: GtinRow[] = all.length
     ? [
         { key: SHARED, label: 'All variants', gtin: null, mpn: sharedMpn, mpnPlaceholder: '' },
         ...variants.map((v) => ({
