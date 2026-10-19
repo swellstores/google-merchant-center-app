@@ -47,7 +47,7 @@ Every product has a **Google** tab. All of it is optional; the app sends what it
 - **No barcode (GTIN) or part number (MPN):** for handmade, custom or vintage products. It hides the MPN field and the barcodes table.
 - **MPN:** the manufacturer part number. Variants without their own use this one.
 - **Barcodes:** a table with a GTIN (UPC, EAN, ISBN) and, if needed, an MPN for each variant. A variant's MPN overrides the product's.
-- **Google needs:** appears when Google asks for details such as color, size or material. You pick the variant option that holds each one, and every variant then sends its own value.
+- **Variant attributes:** for products with variants, shows Color, Size, Material and Pattern. Pick the variant option that holds each one, and every variant sends its own value. When Google asks for one, the row says so. Every variant also sends all its options to Google as variant options, as named in Swell.
 - **Age group** and **Gender:** for clothing and accessories, where Google requires them.
 - **Status** and **Preview:** what Google says about the product right now, and how the product can look in Google Shopping, built from the unsaved form. The status panel also has **Resend now**, which queues the product for Google again. It shows only while the store is connected and the product is not hidden.
 
@@ -88,7 +88,7 @@ Open **Apps → Google Merchant Center → Settings** (Connection section) in yo
 ## Day-to-day use
 
 - **Nothing to do for new products and changes.** They are queued and sent on their own.
-- **Fill in the Google tab** for products Google disapproves: most often a brand, barcodes, or the details in **Google needs**.
+- **Fill in the Google tab** for products Google disapproves: most often a brand, barcodes, or the **Variant attributes**.
 - **Hide what you do not want listed** with **Hide from Google**.
 - **Look in now and then** at **Apps → Google Merchant Center → Settings** (Overview section). The account card says what Merchant Center needs from you; **Top issues** says what Google found in the products.
 - **Sync all** after changes made outside Swell or when Google lost products. **Refresh statuses** to see Google's latest verdict.

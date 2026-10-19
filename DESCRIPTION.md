@@ -23,7 +23,7 @@ When the account itself is the problem, such as an unverified website or missing
 
 ## A Google tab on every product
 
-Add the details Google asks for, right on the product: brand, condition, category, barcodes and part numbers for each variant, age group and gender. When Google needs a detail such as color or size, pick the variant option that holds it. A preview shows how the product can look in Google Shopping.
+Add the details Google asks for, right on the product: brand, condition, category, barcodes and part numbers for each variant, age group and gender. Under **Variant attributes**, pick the variant option that holds the color, size, material or pattern, and every variant sends its own value, along with all its options as named in Swell. A preview shows how the product can look in Google Shopping.
 
 ## Good to know
 
