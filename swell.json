@@ -8,5 +8,32 @@
   "permissions": [
     "write_products",
     "write_:batch"
+  ],
+  "full_description": "List your products in Google Shopping and free listings, and keep them current. Connect your Merchant Center account once; your catalog is sent to Google and updated whenever a product, a price or the stock changes.\n\n**Connect your own account.** A guided page walks you through a Google Cloud project with the Merchant API, a service account key, and access for that account in Merchant Center. Each step shows whether Google accepts it and what to fix if not. Disconnect stops syncing and can remove the products from Google. One Merchant Center account and one country per store.\n\n**Your catalog in Google.** Every active product and variant is sent with its price, images and availability. Edits to a product, a variant or the stock follow within minutes, and Sync all sends the whole catalog again. Gift cards, subscription-only products, and products without a price or an image are not sent.\n\n**A Google tab on every product.** Hide the product from Google, and set its brand, condition, Google category, age group and gender. Give each variant its barcode (GTIN) and part number, or mark handmade and vintage products as having none. When Google asks for details such as color or size, pick the variant option that holds each one. A preview shows how the product can look in Google Shopping.\n\n**See what Google says.** The Overview page counts products as approved, partly approved, pending, disapproved, not sent or hidden, lists the top issues with examples and a link to Google's help, and shows the same status on each product.\n\n**Know why Google holds your products.** When the account is the problem, such as an unverified website or missing shipping settings, the Overview page says what Merchant Center needs and links to the fix.\n\n**Stay informed.** If Google stops accepting the connection, the store admins get one email.",
+  "images": [
+    {
+      "id": "connect",
+      "image_src": "assets/images/1-connect.png",
+      "title": "Connect your account in minutes",
+      "description": "A guided page takes you from a Google Cloud service account to Merchant Center, checking each step with Google."
+    },
+    {
+      "id": "catalog",
+      "image_src": "assets/images/2-catalog.png",
+      "title": "Your catalog in Google, kept current",
+      "description": "Products and variants are sent to Google and updated as they change, with the status of every product at a glance."
+    },
+    {
+      "id": "reasons",
+      "image_src": "assets/images/3-reasons.png",
+      "title": "Know why Google holds your products",
+      "description": "Account problems such as an unverified website or missing shipping are shown with what to do and a link to the fix."
+    },
+    {
+      "id": "product",
+      "image_src": "assets/images/4-product.png",
+      "title": "A Google tab on every product",
+      "description": "Set the brand, barcodes and the details Google asks for, hide a product, and preview it in Google Shopping."
+    }
   ]
 }
