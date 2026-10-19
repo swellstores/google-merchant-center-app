@@ -58,6 +58,17 @@ export const registerGcp = (accountId: string): GoogleCall => ({
   body: {},
 });
 
+export const listPrograms = (accountId: string): GoogleCall => ({
+  method: 'GET',
+  path: `/accounts/v1/${account(accountId)}/programs`,
+});
+
+export const listAccountIssues = (accountId: string): GoogleCall => ({
+  method: 'GET',
+  path: `/accounts/v1/${account(accountId)}/issues`,
+  query: { pageSize: '50' },
+});
+
 export const listQuotas = (accountId: string): GoogleCall => ({
   method: 'GET',
   path: `/quota/v1/${account(accountId)}/quotas`,
