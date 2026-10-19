@@ -78,9 +78,12 @@ describe('setCell', () => {
 });
 
 describe('tableValidity', () => {
-  it('names the variant with a bad GTIN', () => {
-    const model = gtinTableModel({ variants: VARIANTS }, { v2: { gtin: '4006381333932' } }, APP);
-    expect(tableValidity(model)).toBe('GTIN of variant M: the check digit is wrong.');
+  // The admin shows this under the field after a save; the table itself names each bad cell
+  it('summarises the bad GTINs without repeating the table', () => {
+    const one = gtinTableModel({ variants: VARIANTS }, { v2: { gtin: '4006381333932' } }, APP);
+    expect(tableValidity(one)).toBe('A barcode above is not a valid GTIN.');
+    const two = gtinTableModel({ variants: VARIANTS }, { v1: { gtin: '123' }, v2: { gtin: '4006381333932' } }, APP);
+    expect(tableValidity(two)).toBe('2 barcodes above are not valid GTINs.');
     expect(tableValidity(gtinTableModel({ variants: VARIANTS }, { v2: { gtin: '4006381333931' } }, APP))).toBeNull();
   });
 });

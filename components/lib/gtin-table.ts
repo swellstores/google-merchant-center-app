@@ -72,12 +72,10 @@ export function gtinProblem(row: GtinRow): string | null {
   return `GTIN of ${who}: ${REASONS[check.reason]}`;
 }
 
-/** Not-sent values are not checked. */
+/** Not-sent values are not checked. A summary: the admin shows it under the table, which names each cell itself. */
 export function tableValidity(model: GtinTableModel): string | null {
   if (model.disabled) return null;
-  for (const row of model.rows) {
-    const problem = gtinProblem(row);
-    if (problem) return problem;
-  }
-  return null;
+  const bad = model.rows.filter((row) => gtinProblem(row)).length;
+  if (bad === 0) return null;
+  return bad === 1 ? 'A barcode above is not a valid GTIN.' : `${bad} barcodes above are not valid GTINs.`;
 }
