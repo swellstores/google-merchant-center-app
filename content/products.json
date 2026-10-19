@@ -41,20 +41,6 @@
       ]
     },
     { "id": "identifier_exists", "label": "Has a GTIN or MPN", "type": "toggle", "default": true },
-    {
-      "id": "sync_state",
-      "label": "Google sync",
-      "type": "select",
-      "readonly": true,
-      "options": [
-        { "value": "sent", "label": "Sent" },
-        { "value": "error", "label": "Error" },
-        { "value": "skipped", "label": "Not sent" }
-      ]
-    },
-    { "id": "sync_reason", "label": "Why not sent", "type": "short_text", "readonly": true },
-    { "id": "sync_error", "label": "Last Google error", "type": "long_text", "readonly": true },
-    { "id": "date_synced", "label": "Last sent", "type": "datetime", "readonly": true },
     { "id": "status_label", "label": "Google", "type": "short_text", "readonly": true },
     { "id": "date_status", "label": "Status checked", "type": "datetime", "readonly": true }
   ],
@@ -73,16 +59,7 @@
             { "type": "field_row", "fields": [{ "id": "brand" }, { "id": "mpn" }] },
             { "type": "field_row", "fields": [{ "id": "condition" }, { "id": "identifier_exists" }] },
             { "id": "google_category" },
-            { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] },
-            {
-              "type": "field_group",
-              "label": "Sync details",
-              "fields": [
-                { "type": "field_row", "fields": [{ "id": "sync_state" }, { "id": "date_synced" }] },
-                { "id": "sync_reason" },
-                { "id": "sync_error" }
-              ]
-            }
+            { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] }
           ]
         }
       ]

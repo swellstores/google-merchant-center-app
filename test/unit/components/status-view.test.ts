@@ -105,6 +105,19 @@ describe('statusPanelModel', () => {
     expect(statusPanelModel(view(), NOW).refusal).toBeNull();
   });
 
+  it('a product never sent shows no refusal beside its stored issue', () => {
+    const stored = { status: 'not_sent' as const, sync_state: 'error' as const, sync_error: 'Invalid GTIN [gtin]' };
+    expect(statusPanelModel(view({ stored }), NOW).refusal).toBeNull();
+  });
+
+  it('the panel says when the product was last sent', () => {
+    const stored = { status: 'approved' as const, date_synced: '2026-10-15T09:30:00Z' };
+    expect(statusPanelModel(view({ stored }), NOW).lastSent).toBe('Last sent to Google 2026-10-15');
+    expect(statusPanelModel(view({ stored: { ...stored, date_synced: null } }), NOW).lastSent).toBeNull();
+    expect(statusPanelModel(view({ stored: { ...stored, date_synced: 'not a date' } }), NOW).lastSent).toBeNull();
+    expect(statusPanelModel(view({ stored: {} }), NOW).lastSent).toBeNull();
+  });
+
   it('a product never sent reads Not sent', () => {
     const model = statusPanelModel(view({ stored: {} }), NOW);
     expect(model.headline).toEqual({ tone: 'neutral', text: 'Not sent' });

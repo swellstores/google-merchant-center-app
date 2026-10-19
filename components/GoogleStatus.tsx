@@ -166,6 +166,7 @@ export default function GoogleStatus(props: ComponentProps) {
           {model.issues.length > 0 && <Issues issues={model.issues} />}
           {error && <Notice tone="bad">{error}</Notice>}
           {queued && <Notice tone="ok">Queued. Google gets it within a minute.</Notice>}
+          {model.lastSent && <span class="gmc-muted">{model.lastSent}</span>}
           {model.canResend && (
             <div class="gmc-actions">
               <Button kind="secondary" disabled={busy} onClick={resend}>

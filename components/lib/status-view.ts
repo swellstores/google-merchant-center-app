@@ -51,6 +51,8 @@ export interface StatusPanelModel {
   note: string | null;
   /** Google's refusal of part of the product at the last send */
   refusal: string | null;
+  /** "Last sent to Google 2026-10-15" */
+  lastSent: string | null;
   markets: { market: string; heading: string; offers: { title: string; tone: Tone; text: string; issues: OfferIssue[] }[] }[];
   /** Stored issues when there is no live answer */
   issues: StatusIssue[];
@@ -106,6 +108,7 @@ export function statusPanelModel(view: ProductStatusView, now: number): StatusPa
   const offers = view.live?.offers ?? [];
   const live = view.connected && !view.live_error && offers.length > 0;
   const excluded = view.stored.status === 'excluded';
+  const sentDay = day(view.stored.date_synced);
 
   let headline = STATUSES[view.stored.status ?? 'not_sent'];
   if (view.stored.status_label && !excluded) headline = { ...headline, text: view.stored.status_label };
@@ -134,7 +137,8 @@ export function statusPanelModel(view: ProductStatusView, now: number): StatusPa
     headline: { tone: headline.tone, text: headline.text },
     checked: live && view.live ? checkedText(view.live.checked_at, now) : null,
     note: noteOf(view),
-    refusal: view.stored.sync_state === 'error' && view.stored.sync_error ? `Google refused part of this product: ${view.stored.sync_error}` : null,
+    refusal: view.stored.sync_state === 'error' && view.stored.sync_error && view.stored.status !== 'not_sent' ? `Google refused part of this product: ${view.stored.sync_error}` : null,
+    lastSent: sentDay ? `Last sent to Google ${sentDay}` : null,
     markets: [...markets.values()],
     issues: live ? [] : (view.stored.status_issues ?? []),
     canResend: view.connected && !excluded,
