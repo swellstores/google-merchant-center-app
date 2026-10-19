@@ -35,6 +35,12 @@ describe('storeBrands', () => {
     expect(await storeBrands(ctx)).toEqual({ brands: ['Ok'] });
   });
 
+  it('does not suggest a brand longer than Google takes (70 characters)', async () => {
+    const longest = 'B'.repeat(70);
+    const { ctx } = setup({ results: [brandOf('A'.repeat(71)), brandOf(`  ${longest}  `), brandOf('Ok')] });
+    expect(await storeBrands(ctx)).toEqual({ brands: [longest, 'Ok'] });
+  });
+
   it('keeps at most 500 brands', async () => {
     const results = Array.from({ length: 700 }, (_, i) => brandOf(`b${String(i).padStart(3, '0')}`));
     expect((await storeBrands(setup({ results }).ctx)).brands).toHaveLength(500);

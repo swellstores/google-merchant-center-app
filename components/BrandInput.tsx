@@ -65,6 +65,7 @@ export default function BrandInput(props: ComponentProps) {
           aria-autocomplete="list"
           aria-activedescendant={listed && active >= 0 ? `gmc-brand-opt-${active}` : undefined}
           autoComplete="off"
+          maxLength={70}
           value={text}
           disabled={Boolean(props.readonly)}
           onInput={(e) => {

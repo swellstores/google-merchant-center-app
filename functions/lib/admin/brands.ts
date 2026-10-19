@@ -1,6 +1,8 @@
 import type { AppContext } from '../context';
 
 export const MAX_BRANDS = 500;
+/** Google's limit on a brand. */
+const MAX_BRAND_LENGTH = 70;
 
 /** The brand of one product, under the app id or (as the admin credentials key it) the app record id. */
 function brandOf(result: any, appId: string): unknown {
@@ -28,7 +30,7 @@ export async function storeBrands(ctx: AppContext): Promise<{ brands: string[] }
     const brand = brandOf(result, ctx.appId);
     if (typeof brand !== 'string') continue;
     const name = brand.trim();
-    if (name && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
+    if (name && name.length <= MAX_BRAND_LENGTH && !seen.has(name.toLowerCase())) seen.set(name.toLowerCase(), name);
   }
   return { brands: [...seen.values()].sort(byName).slice(0, MAX_BRANDS) };
 }
