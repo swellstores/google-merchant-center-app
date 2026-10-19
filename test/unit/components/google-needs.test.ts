@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { choose, needRows } from '../../../components/lib/google-needs';
+import { MISSING_OPTION, choose, needHint, needRows } from '../../../components/lib/google-needs';
 
 const APP = 'google_merchant_center';
 const issue = (attribute: string) => ({ code: 'c', severity: 'demoted', description: 'd', attribute, offers: [], countries: [] });
@@ -64,6 +64,23 @@ describe('needRows', () => {
     expect(needRows(record(['color'], OPTIONS), { color: 'gone' }, APP)[0]).toMatchObject({ chosen: 'gone', missing: true });
     expect(needRows(record(['color'], OPTIONS), { color: 'o2' }, APP)[0]).toMatchObject({ missing: true });
     expect(needRows(record(['color']), { color: 'o1' }, APP)[0]).toMatchObject({ kind: 'option', missing: true });
+  });
+});
+
+describe('needHint', () => {
+  it('points a field row to its field below the block', () => {
+    const [ageGroup, gender] = needRows(record(['gender', 'age_group'], OPTIONS), null, APP);
+    expect(needHint(ageGroup)).toBe('Set “Age group” below.');
+    expect(needHint(gender)).toBe('Set “Gender” below.');
+  });
+
+  it('asks to create an option, and gives an option row no hint', () => {
+    expect(needHint(needRows(record(['size']), null, APP)[0])).toBe('Create a variant option for the size on the Options tab, then pick it here.');
+    expect(needHint(needRows(record(['size'], OPTIONS), null, APP)[0])).toBeNull();
+  });
+
+  it('a chosen option that is gone or makes no variants reads as either', () => {
+    expect(MISSING_OPTION).toBe('The chosen option no longer exists or no longer makes variants.');
   });
 });
 

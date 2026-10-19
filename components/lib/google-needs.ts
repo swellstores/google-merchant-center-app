@@ -48,6 +48,15 @@ export function needRows(record: unknown, value: AttributeOptions | null, appId:
   return rows;
 }
 
+export const MISSING_OPTION = 'The chosen option no longer exists or no longer makes variants.';
+
+/** The line a row without a select shows instead. The age group and gender fields sit in the row after this block. */
+export function needHint(row: Pick<NeedRow, 'kind' | 'label'>): string | null {
+  if (row.kind === 'field') return `Set “${row.label}” below.`;
+  if (row.kind === 'create') return `Create a variant option for the ${row.label.toLowerCase()} on the Options tab, then pick it here.`;
+  return null;
+}
+
 /** "Not sent" is a null, not a deleted key: a save keeps a stored key the value leaves out. */
 export function choose(value: AttributeOptions | null, attribute: OptionAttribute, optionId: string | null): AttributeOptions {
   return { ...value, [attribute]: optionId };

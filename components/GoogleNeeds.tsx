@@ -1,6 +1,6 @@
 import type { ComponentProps } from '@swell/apps-sdk/components';
 import { APP_ID } from './lib/api';
-import { choose, needRows, type NeedRow } from './lib/google-needs';
+import { MISSING_OPTION, choose, needHint, needRows, type NeedRow } from './lib/google-needs';
 import type { AttributeOptions, OptionAttribute } from '../functions/lib/mapping/attributes';
 import { Root, Stack } from './lib/ui';
 
@@ -42,18 +42,14 @@ function NeedField(props: { row: NeedRow; readonly: boolean; onChoose: (optionId
           </select>
           {row.missing && (
             <span id={problemId} class="gmc-needs-bad">
-              The chosen option no longer exists
+              {MISSING_OPTION}
             </span>
           )}
         </>
       ) : (
         <>
           <span class="gmc-needs-label">{row.label}</span>
-          <span class="gmc-muted">
-            {row.kind === 'field'
-              ? `Set “${row.label}” above.`
-              : `Create a variant option for the ${row.label.toLowerCase()} on the Options tab, then pick it here.`}
-          </span>
+          <span class="gmc-muted">{needHint(row)}</span>
         </>
       )}
     </div>
