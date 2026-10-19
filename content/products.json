@@ -88,22 +88,11 @@
           "label": "Google",
           "fields": [
             { "id": "excluded" },
-            {
-              "type": "field_row",
-              "fields": [
-                {
-                  "type": "field_group",
-                  "label": "Product details for Google",
-                  "fields": [
-                    { "type": "field_row", "fields": [{ "id": "brand", "admin_span": 2 }, { "id": "condition", "admin_span": 2 }] },
-                    { "id": "google_category" },
-                    { "id": "identifier_exists" },
-                    { "id": "identifiers" },
-                    { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] }
-                  ]
-                }
-              ]
-            },
+            { "type": "field_row", "fields": [{ "id": "brand", "admin_span": 2 }, { "id": "condition", "admin_span": 2 }] },
+            { "id": "google_category" },
+            { "id": "identifier_exists" },
+            { "id": "identifiers" },
+            { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] },
             {
               "type": "field_row",
               "fields": [

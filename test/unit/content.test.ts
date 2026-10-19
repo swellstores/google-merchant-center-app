@@ -44,29 +44,19 @@ const hints: Record<string, string> = {
 
 describe('products content, Google tab', () => {
   it('lists the fields in order', () => {
-    expect(tab.fields[0]).toEqual({ id: 'excluded' });
-    expect(tab.fields).toHaveLength(3);
-
-    // The admin moves top-level groups to a tab strip after all other fields; a group inside a row stays in place
-    const row: any = tab.fields[1];
-    expect(row.type).toBe('field_row');
-    expect(row.fields).toHaveLength(1);
-    const group: any = row.fields[0];
-    expect(group.type).toBe('field_group');
-    expect(group.label).toBe('Product details for Google');
-    expect(group.fields.map((f: any) => f.id ?? f.fields.map((c: any) => c.id))).toEqual([
+    // No field_group: the admin moves top-level groups to a tab strip after all other fields, and a group
+    // nested in a row loses its fields' defaults and conditions
+    expect(tab.fields.map((f: any) => f.id ?? f.fields.map((c: any) => c.id))).toEqual([
+      'excluded',
       ['brand', 'condition'],
       'google_category',
       'identifier_exists',
       'identifiers',
       ['age_group', 'gender'],
+      ['status_panel', 'preview'],
     ]);
-    expect(group.fields[0].type).toBe('field_row');
-    expect(group.fields[4].type).toBe('field_row');
-
-    const last = tab.fields[2];
-    expect(last.type).toBe('field_row');
-    expect(last.fields.map((f: any) => f.id)).toEqual(['status_panel', 'preview']);
+    for (const i of [1, 5, 6]) expect(tab.fields[i].type).toBe('field_row');
+    expect(flatten(tab.fields).some((f) => f.type === 'field_group')).toBe(false);
   });
 
   it('gives every field the exact hint and no description', () => {
