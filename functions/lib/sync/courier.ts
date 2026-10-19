@@ -192,8 +192,12 @@ async function readAccount(env: DeliveryEnv): Promise<AccountCheck | undefined> 
     googleCall(env.ctx.fetch, env.token, listPrograms(env.accountId)),
     googleCall(env.ctx.fetch, env.token, listAccountIssues(env.accountId)),
   ]);
-  if (programs.status === 'rejected' || issues.status === 'rejected') return undefined;
-  return { reasons: accountReasons(programs.value, issues.value, env.markets.map((m) => m.country)), date_checked: iso(env.ctx.now()) };
+  if (programs.status === 'fulfilled' && issues.status === 'fulfilled') {
+    return { reasons: accountReasons(programs.value, issues.value, env.markets.map((m) => m.country)), date_checked: iso(env.ctx.now()) };
+  }
+  const { reason } = [programs, issues].find((call) => call.status === 'rejected') as PromiseRejectedResult;
+  console.warn(`Account check failed: ${reason instanceof Error ? reason.message : String(reason)} (${reason instanceof GoogleApiError ? reason.kind : 'unknown'})`);
+  return undefined;
 }
 
 async function work(run: Run): Promise<WorkResult> {

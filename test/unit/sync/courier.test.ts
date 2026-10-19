@@ -1086,7 +1086,10 @@ describe('runCourier status jobs', () => {
     const refused = { status: 401, body: { error: { code: 401, message: 'Request had invalid authentication credentials.' } } };
     const { ctx, swell, google } = await listed([MUG], { programs: refused, accountIssues: { status: 200, body: ACCOUNT_ISSUES } });
     await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) }, account_check: { $set: STORED_CHECK } });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 0 });
+    expect(warn.mock.calls).toEqual([['Account check failed: Request had invalid authentication credentials. (auth)']]);
+    warn.mockRestore();
     expect(accountReads(google)).toEqual(['issues', 'programs']);
     const state = await loadState(swell);
     expect(state.account_check).toEqual(STORED_CHECK);
@@ -1116,7 +1119,9 @@ describe('runCourier status jobs', () => {
       if (url === '/:batch') openAtBatch.push(open);
       return post(url, data);
     });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(await runCourier(testContext(swell, issuesLater))).toEqual({ next: 'idle', sent: 0 });
+    warn.mockRestore();
     expect(accountReads(google)).toEqual(['issues', 'programs']);
     expect(openAtBatch.at(-1)).toBe(0);
   });
