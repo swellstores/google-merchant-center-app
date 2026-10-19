@@ -54,6 +54,10 @@ export interface StatusPanelModel {
   /** "Last sent to Google 2026-10-15" */
   lastSent: string | null;
   markets: { market: string; heading: string; offers: { title: string; tone: Tone; text: string; issues: OfferIssue[] }[] }[];
+  /** One line per market: "2 variants pending" */
+  summaries: { heading: string; text: string; tone: Tone }[];
+  /** Shown when the product is hidden from Google */
+  hidden: string | null;
   /** Stored issues when there is no live answer */
   issues: StatusIssue[];
   canResend: boolean;
@@ -104,6 +108,17 @@ function noteOf(view: ProductStatusView): string | null {
   return null;
 }
 
+const LABELS: Record<string, string> = { disapproved: 'disapproved', partial: 'partly approved', pending: 'pending', approved: 'approved' };
+
+function summaryOf(group: OfferView[]): { text: string; tone: Tone } {
+  const counts = WORST.map((status) => ({ status, n: group.filter((offer) => offer.status === status).length })).filter((c) => c.n > 0);
+  const tone = STATUSES[counts[0].status].tone;
+  if (counts.length > 1) return { text: counts.map((c) => `${c.n} ${LABELS[c.status]}`).join(', '), tone };
+  const { status, n } = counts[0];
+  if (n === 1 && !group[0].variant) return { text: STATUSES[status].text, tone };
+  return { text: `${n} variant${n === 1 ? '' : 's'} ${LABELS[status]}`, tone };
+}
+
 export function statusPanelModel(view: ProductStatusView, now: number): StatusPanelModel {
   const offers = view.live?.offers ?? [];
   const live = view.connected && !view.live_error && offers.length > 0;
@@ -133,6 +148,9 @@ export function statusPanelModel(view: ProductStatusView, now: number): StatusPa
     }
   }
 
+  const byMarket = new Map<string, OfferView[]>();
+  if (live) for (const offer of offers) byMarket.set(offer.market, [...(byMarket.get(offer.market) ?? []), offer]);
+
   return {
     headline: { tone: headline.tone, text: headline.text },
     checked: live && view.live ? checkedText(view.live.checked_at, now) : null,
@@ -140,6 +158,8 @@ export function statusPanelModel(view: ProductStatusView, now: number): StatusPa
     refusal: view.stored.sync_state === 'error' && view.stored.sync_error && view.stored.status !== 'not_sent' ? `Google refused part of this product: ${view.stored.sync_error}` : null,
     lastSent: sentDay ? `Last sent to Google ${sentDay}` : null,
     markets: [...markets.values()],
+    summaries: [...byMarket].map(([market, group]) => ({ heading: marketHeading(market), ...summaryOf(group) })),
+    hidden: excluded ? 'Turn on “List this product in Google” above to list it again.' : null,
     issues: live ? [] : (view.stored.status_issues ?? []),
     canResend: view.connected && !excluded,
   };

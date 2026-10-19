@@ -123,6 +123,41 @@ describe('statusPanelModel', () => {
     expect(model.headline).toEqual({ tone: 'neutral', text: 'Not sent' });
     expect(model.note).toBeNull();
   });
+
+  it('summaries count offers per market, worst first', () => {
+    const model = statusPanelModel(
+      view({
+        live: {
+          checked_at: '2026-10-16T12:00:00Z',
+          more: 0,
+          offers: [
+            offer({ input_id: 'a', variant: 'Red', status: 'pending' }),
+            offer({ input_id: 'b', variant: 'Blue', status: 'disapproved' }),
+            offer({ input_id: 'c', market: 'DE de', variant: 'Red', status: 'pending' }),
+            offer({ input_id: 'd', market: 'DE de', variant: 'Blue', status: 'pending' }),
+            offer({ input_id: 'e', market: 'FR fr', variant: 'Red', status: 'approved' }),
+          ],
+        },
+      }),
+      NOW,
+    );
+    expect(model.summaries).toEqual([
+      { heading: 'United States · en', text: '1 disapproved, 1 pending', tone: 'bad' },
+      { heading: 'Germany · de', text: '2 variants pending', tone: 'neutral' },
+      { heading: 'France · fr', text: '1 variant approved', tone: 'ok' },
+    ]);
+    expect(statusPanelModel(view({ connected: false }), NOW).summaries).toEqual([]);
+  });
+
+  it("a simple product's summary is its status", () => {
+    const model = statusPanelModel(view({ live: { checked_at: '2026-10-16T12:00:00Z', more: 0, offers: [offer({ status: 'pending' })] } }), NOW);
+    expect(model.summaries).toEqual([{ heading: 'United States · en', text: 'Pending', tone: 'neutral' }]);
+  });
+
+  it('the hidden note points to the switch above', () => {
+    expect(statusPanelModel(view({ stored: { status: 'excluded' } }), NOW).hidden).toBe('Turn on “List this product in Google” above to list it again.');
+    expect(statusPanelModel(view(), NOW).hidden).toBeNull();
+  });
 });
 
 describe('issueSeverity', () => {
