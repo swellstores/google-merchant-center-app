@@ -1,6 +1,7 @@
 import { AppError, type AppContext } from '../context';
 import { connectionRead, type Connection, type ConnectionStatus } from '../connection/store';
 import { marketsRead, type Market } from '../connection/markets';
+import type { AccountReason } from '../status/account';
 import { newOrphanScanJob } from '../status/orphans';
 import { newStatusRefreshJob, type StatusSummary } from '../status/refresh';
 import { orphanScanDue } from '../status/schedule';
@@ -20,6 +21,8 @@ export interface DashboardView {
   /** The courier's */
   last_error: string | null;
   markets: { country: string; language: string; currency: string }[];
+  /** What Google waits for; empty when nothing is held */
+  account: { reasons: AccountReason[]; merchant_url: string | null };
 }
 
 interface Snapshot {
@@ -64,6 +67,10 @@ function viewOf({ connection, state, markets, queue }: Snapshot, now: number): D
     paused_until: until && Date.parse(until) > now ? until : null,
     last_error: state?.last_error ?? null,
     markets: markets.map(({ country, language, currency }) => ({ country, language, currency })),
+    account: {
+      reasons: state?.account_check?.reasons ?? [],
+      merchant_url: connection?.merchant_id ? `https://merchants.google.com/mc/overview?a=${encodeURIComponent(connection.merchant_id)}` : null,
+    },
   };
 }
 

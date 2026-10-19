@@ -43,6 +43,24 @@ describe('dashboardView', () => {
     expect(JSON.stringify(view)).not.toMatch(/SECRET|link_template|data_source/);
   });
 
+  it('the dashboard view carries the stored reasons and the Merchant Center link', async () => {
+    const { ctx, swell } = setup();
+    const { id } = await loadState(swell);
+    const reasons = [{ source: 'requirement', program: 'free-listings', code: 'HAS_WEBSITE', title: 'No website URL', action: 'Add it.', documentation: null, countries: ['US'] }];
+    await saveState(swell, id, { account_check: { $set: { reasons, date_checked: at(NOW) } } });
+    expect((await dashboardView(ctx)).account).toEqual({ reasons, merchant_url: 'https://merchants.google.com/mc/overview?a=123' });
+  });
+
+  it('no stored reasons, no card', async () => {
+    const { ctx, swell } = setup();
+    expect((await dashboardView(ctx)).account).toEqual({ reasons: [], merchant_url: 'https://merchants.google.com/mc/overview?a=123' });
+    const { id } = await loadState(swell);
+    await saveState(swell, id, { account_check: { $set: { reasons: [], date_checked: at(NOW) } } });
+    expect((await dashboardView(ctx)).account.reasons).toEqual([]);
+    const none = setup(null);
+    expect((await dashboardView(none.ctx)).account).toEqual({ reasons: [], merchant_url: null });
+  });
+
   it('shows a quota pause only while it lasts', async () => {
     const { ctx, swell } = setup();
     const { id } = await loadState(swell);

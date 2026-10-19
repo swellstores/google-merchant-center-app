@@ -13,6 +13,7 @@ const CSS = `
   --accent: #2563eb; --accent-text: #ffffff; --focus: #4262ff;
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --ok: #047857; --ok-bg: #ecfdf5;
+  --warn: #b45309; --warn-bg: #fffbeb;
   --bad: #b91c1c; --bad-bg: #fef2f2;
   --info: #1d4ed8; --info-bg: #eff6ff;
   color-scheme: light dark;
@@ -26,6 +27,7 @@ const CSS = `
     --accent: #60a5fa; --accent-text: #0b1220; --focus: #a6b5ff;
     --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     --ok: #34d399; --ok-bg: rgba(52, 211, 153, .12);
+    --warn: #fbbf24; --warn-bg: rgba(251, 191, 36, .12);
     --bad: #f87171; --bad-bg: rgba(248, 113, 113, .12);
     --info: #93c5fd; --info-bg: rgba(147, 197, 253, .12);
   }

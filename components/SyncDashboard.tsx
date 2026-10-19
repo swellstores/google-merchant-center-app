@@ -102,6 +102,30 @@ export default function SyncDashboard(props: ComponentProps) {
       {model.banner && <Notice tone={model.banner.tone}>{model.banner.text}</Notice>}
       {error && <Notice tone="bad">{error}</Notice>}
 
+      {model.account && (
+        <div style={{ background: 'var(--warn-bg)', borderLeft: '4px solid var(--warn)', borderRadius: 8, padding: 16 }}>
+          <Stack gap={12}>
+            <Stack gap={4}>
+              <h3 class="gmc-title">{model.account.title}</h3>
+              <span>{model.account.lead}</span>
+            </Stack>
+            <Stack as="ul" gap={12}>
+              {model.account.rows.map((row, i) => (
+                <li key={i}>
+                  <Stack gap={4}>
+                    <strong>{row.title}</strong>
+                    {row.meta && <div class="gmc-muted">{row.meta}</div>}
+                    {row.action && <div>{row.action}</div>}
+                    {row.documentation && <ExternalLink href={row.documentation}>How to fix</ExternalLink>}
+                  </Stack>
+                </li>
+              ))}
+            </Stack>
+            {model.account.merchantUrl && <ExternalLink href={model.account.merchantUrl}>Open Merchant Center</ExternalLink>}
+          </Stack>
+        </div>
+      )}
+
       <Card>
         <div class="gmc-stats">
           {model.stats.map((stat) => (

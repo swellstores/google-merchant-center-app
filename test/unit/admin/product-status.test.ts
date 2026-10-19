@@ -5,7 +5,7 @@ import { APP_ID, fixedClock, NOW, testContext } from '../../helpers/context';
 import { batchesOf, createFakeSwell } from '../../helpers/fake-swell';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { makeServiceAccountKey } from '../../helpers/keys';
-import { loadAlarm } from '../../helpers/store';
+import { loadAlarm, loadState, saveState } from '../../helpers/store';
 
 const DS = 'accounts/123/dataSources/1';
 const FRESH = { access_token: 'SECRET-TOKEN', access_token_expires: new Date(NOW + 3_600_000).toISOString() };
@@ -48,13 +48,24 @@ describe('productStatusView', () => {
     expect(view).toEqual({
       connected: true,
       stored: { status: 'not_sent', status_label: 'Not sent: no price', status_issues: [], date_status: '2026-10-15T00:00:00.000Z', sync_state: 'skipped', sync_reason: 'no_price' },
+      account_waiting: false,
       live: null,
       live_error: null,
     });
     expect(google.requests).toEqual([]);
     expect(batchesOf(swell)).toHaveLength(1);
-    expect(batchesOf(swell)[0].map((op) => op.url)).toEqual(['/connections', '/markets', `/products/${PID}`]);
+    expect(batchesOf(swell)[0].map((op) => op.url)).toEqual(['/connections', '/markets', `/products/${PID}`, '/sync-states']);
     expect(batchesOf(swell)[0][2]).toEqual({ method: 'get', url: `/products/${PID}`, data: { expand: ['variants:1000'] } });
+  });
+
+  it('account_waiting is true while reasons are stored', async () => {
+    const { ctx, swell } = setup();
+    const { id } = await loadState(swell);
+    const reasons = [{ source: 'issue', program: null, code: 'X', title: 'X', action: null, documentation: null, countries: ['US'] }];
+    await saveState(swell, id, { account_check: { $set: { reasons, date_checked: '2026-10-16T00:00:00.000Z' } } });
+    expect((await productStatusView(ctx, PID, false)).account_waiting).toBe(true);
+    await saveState(swell, id, { account_check: { $set: { reasons: [], date_checked: '2026-10-16T00:00:00.000Z' } } });
+    expect((await productStatusView(ctx, PID, false)).account_waiting).toBe(false);
   });
 
   it('a disconnected store answers without Google', async () => {

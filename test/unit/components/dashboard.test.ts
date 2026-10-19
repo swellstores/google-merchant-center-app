@@ -14,6 +14,7 @@ function view(patch: Partial<DashboardView> = {}): DashboardView {
     paused_until: null,
     last_error: null,
     markets: [],
+    account: { reasons: [], merchant_url: 'https://merchants.google.com/mc/overview?a=123' },
     ...patch,
   };
 }
@@ -116,5 +117,28 @@ describe('dashboardModel', () => {
     const model = dashboardModel(view({ summary: { ...summary('2026-10-16T11:59:30Z'), top_issues: [{ ...issue('disapproved'), documentation: 'https://g.co/x' }] } }), NOW);
     expect(model.issues[0]).toMatchObject({ code: 'disapproved', description: 'Bad', documentation: 'https://g.co/x' });
     expect(model.refreshedText).toBe('Statuses checked just now');
+  });
+
+  it('no stored reasons, no card', () => {
+    expect(dashboardModel(view(), NOW).account).toBeNull();
+  });
+
+  it('the card row reads program and countries', () => {
+    const reasons = [
+      { source: 'requirement' as const, program: 'free-listings' as const, code: 'HAS_WEBSITE', title: 'No website URL', action: 'Add it.', documentation: 'https://support.google.com/x', countries: ['US'] },
+      { source: 'requirement' as const, program: 'shopping-ads' as const, code: 'B', title: 'B', action: null, documentation: null, countries: ['US', 'DE'] },
+      { source: 'issue' as const, program: null, code: 'C', title: 'C', action: null, documentation: null, countries: ['DE'] },
+    ];
+    const { account } = dashboardModel(view({ account: { reasons, merchant_url: 'https://merchants.google.com/mc/overview?a=123' } }), NOW);
+    expect(account).toEqual({
+      title: 'Google is not showing your products yet',
+      lead: 'Merchant Center needs a few things from you. Products wait in “Pending” until then.',
+      rows: [
+        { title: 'No website URL', meta: 'Free listings · United States', action: 'Add it.', documentation: 'https://support.google.com/x' },
+        { title: 'B', meta: 'Shopping ads · United States, Germany', action: null, documentation: null },
+        { title: 'C', meta: 'Germany', action: null, documentation: null },
+      ],
+      merchantUrl: 'https://merchants.google.com/mc/overview?a=123',
+    });
   });
 });

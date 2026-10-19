@@ -8,6 +8,7 @@ import { getProduct } from '../google/merchant';
 import { marketOfInput, parseInputId } from '../mapping/offers';
 import type { GoogleFields, SwellProduct, SwellVariant } from '../mapping/types';
 import { groupIssues, offerStatus, type GoogleProductStatus, type OfferAnswer, type StatusIssue } from '../status/product-status';
+import { stateRead, type SyncState } from '../sync/state';
 import { queueChange } from '../sync/queue';
 import { listOf, recordOf, swellBatch, type BatchOp } from '../swell-batch';
 import { iso } from '../time';
@@ -24,6 +25,8 @@ export interface OfferView {
 export interface ProductStatusView {
   connected: boolean;
   stored: Pick<GoogleFields, 'status' | 'status_label' | 'status_issues' | 'date_status' | 'sync_state' | 'sync_reason' | 'sync_error' | 'date_synced'>;
+  /** Google holds the products until the account's reasons are met */
+  account_waiting: boolean;
   live: { offers: OfferView[]; more: number; checked_at: string } | null;
   live_error: string | null;
 }
@@ -113,16 +116,17 @@ async function liveOffers(ctx: AppContext, connection: Connection, markets: Mark
  * is part of the answer: the stored status still shows.
  */
 export async function productStatusView(ctx: AppContext, productId: string, live: boolean): Promise<ProductStatusView> {
-  const reads: BatchOp[] = [connectionRead, marketsRead, { method: 'get', url: `/products/${productId}`, data: { expand: ['variants:1000'] } }];
+  const reads: BatchOp[] = [connectionRead, marketsRead, { method: 'get', url: `/products/${productId}`, data: { expand: ['variants:1000'] } }, stateRead];
   const answers = await swellBatch(ctx.swell, reads);
   const connection = listOf<Connection>(answers[0], 'the connection')[0] ?? null;
   const markets = listOf<Market>(answers[1], 'the markets');
   const product = recordOf<SwellProduct>(answers[2], 'the product');
+  const state = listOf<SyncState>(answers[3], 'the sync state')[0] ?? null;
   if (!product) throw new AppError('product_not_found', 'The product does not exist', 404);
 
   const fields = product.$app?.[ctx.appId] ?? {};
   const connected = connection?.status === 'connected';
-  const view: ProductStatusView = { connected, stored: storedOf(fields), live: null, live_error: null };
+  const view: ProductStatusView = { connected, stored: storedOf(fields), account_waiting: (state?.account_check?.reasons.length ?? 0) > 0, live: null, live_error: null };
   const inputIds = fields.input_ids ?? [];
   if (!live || !connected || !inputIds.length) return view;
 

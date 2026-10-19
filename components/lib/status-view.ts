@@ -38,6 +38,7 @@ export interface ProductStatusView {
     sync_error?: string | null;
     date_synced?: string | null;
   };
+  account_waiting: boolean;
   live: { offers: OfferView[]; more: number; checked_at: string } | null;
   live_error: string | null;
 }
@@ -56,6 +57,8 @@ export interface StatusPanelModel {
   markets: { market: string; heading: string; offers: { title: string; tone: Tone; text: string; issues: OfferIssue[] }[] }[];
   /** One line per market: "2 variants pending" */
   summaries: { heading: string; text: string; tone: Tone }[];
+  /** Why a pending product waits, while the account has unmet reasons */
+  accountNote: string | null;
   /** Shown when the product is hidden from Google */
   hidden: string | null;
   /** Stored issues when there is no live answer */
@@ -125,10 +128,12 @@ export function statusPanelModel(view: ProductStatusView, now: number): StatusPa
   const excluded = view.stored.status === 'excluded';
   const sentDay = day(view.stored.date_synced);
 
-  let headline = STATUSES[view.stored.status ?? 'not_sent'];
+  let headlineStatus: StatusValue = view.stored.status ?? 'not_sent';
+  let headline = STATUSES[headlineStatus];
   if (view.stored.status_label && !excluded) headline = { ...headline, text: view.stored.status_label };
   if (live && !excluded) {
     const worst = WORST.find((status) => offers.some((offer) => offer.status === status)) ?? 'pending';
+    headlineStatus = worst;
     const count = offers.filter((offer) => offer.status === worst).length;
     headline = { ...STATUSES[worst], text: count < offers.length ? `${STATUSES[worst].text} (${count} of ${offers.length})` : STATUSES[worst].text };
   }
@@ -159,6 +164,7 @@ export function statusPanelModel(view: ProductStatusView, now: number): StatusPa
     lastSent: sentDay ? `Last sent to Google ${sentDay}` : null,
     markets: [...markets.values()],
     summaries: [...byMarket].map(([market, group]) => ({ heading: marketHeading(market), ...summaryOf(group) })),
+    accountNote: view.account_waiting && headlineStatus === 'pending' ? "Google waits for your account details before reviewing products. See the app's Overview." : null,
     hidden: excluded ? 'Turn off “Hide from Google” above to list it again.' : null,
     issues: live ? [] : (view.stored.status_issues ?? []),
     canResend: view.connected && !excluded,

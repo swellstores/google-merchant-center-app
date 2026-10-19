@@ -11,7 +11,7 @@ function offer(patch: Partial<OfferView> = {}): OfferView {
 }
 
 function view(patch: Partial<ProductStatusView> = {}): ProductStatusView {
-  return { connected: true, stored: { status: 'approved', status_label: 'Approved', date_status: '2026-10-14T08:00:00Z' }, live: null, live_error: null, ...patch };
+  return { connected: true, stored: { status: 'approved', status_label: 'Approved', date_status: '2026-10-14T08:00:00Z' }, live: null, live_error: null, account_waiting: false, ...patch };
 }
 
 describe('statusPanelModel', () => {
@@ -179,5 +179,15 @@ describe('callRoute with a query', () => {
     const fetchFn = vi.fn(async () => new Response('{}', { status: 200 }));
     await callRoute(fetchFn as unknown as typeof fetch, 'product?id=abc');
     expect(fetchFn).toHaveBeenCalledWith('/functions/google_merchant_center/product?id=abc', { method: 'GET' });
+  });
+
+  it('the product line shows only for a pending product while reasons exist', () => {
+    const LINE = "Google waits for your account details before reviewing products. See the app's Overview.";
+    const pending = { status: 'pending' as const, status_label: 'Pending' };
+    expect(statusPanelModel(view({ stored: pending, account_waiting: true }), NOW).accountNote).toBe(LINE);
+    expect(statusPanelModel(view({ stored: pending }), NOW).accountNote).toBeNull();
+    expect(statusPanelModel(view({ account_waiting: true }), NOW).accountNote).toBeNull();
+    const live = { checked_at: '2026-10-16T12:00:00Z', more: 0, offers: [offer({ status: 'pending' })] };
+    expect(statusPanelModel(view({ account_waiting: true, live }), NOW).accountNote).toBe(LINE);
   });
 });

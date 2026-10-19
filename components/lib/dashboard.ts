@@ -1,3 +1,4 @@
+import { COUNTRIES } from './countries';
 import type { Tone } from './tone';
 
 export const POLL_MS = 10_000;
@@ -30,6 +31,18 @@ export interface DashboardView {
   paused_until: string | null;
   last_error: string | null;
   markets: { country: string; language: string; currency: string }[];
+  account: { reasons: AccountReason[]; merchant_url: string | null };
+}
+
+/** Mirrors `AccountReason` in functions/lib/status/account.ts. */
+export interface AccountReason {
+  source: 'requirement' | 'issue';
+  program: 'free-listings' | 'shopping-ads' | null;
+  code: string;
+  title: string;
+  action: string | null;
+  documentation: string | null;
+  countries: string[];
 }
 
 export interface DashboardModel {
@@ -40,6 +53,13 @@ export interface DashboardModel {
   queueText: string | null;
   issues: { code: string; description: string; documentation?: string; severity: { tone: Tone; label: string }; sampleText: string }[];
   refreshedText: string | null;
+  /** The warning card: why Google holds the products */
+  account: {
+    title: string;
+    lead: string;
+    rows: { title: string; meta: string; action: string | null; documentation: string | null }[];
+    merchantUrl: string | null;
+  } | null;
   canSyncAll: boolean;
   canRefresh: boolean;
 }
@@ -59,6 +79,24 @@ export const SEVERITIES: Record<IssueTally['severity'], { tone: Tone; label: str
   review: { tone: 'neutral', label: 'In review' },
   info: { tone: 'neutral', label: 'Info' },
 };
+
+const COUNTRY_NAMES = new Map(COUNTRIES);
+const PROGRAMS = { 'free-listings': 'Free listings', 'shopping-ads': 'Shopping ads' };
+
+function accountOf({ account }: DashboardView): DashboardModel['account'] {
+  if (account.reasons.length === 0) return null;
+  return {
+    title: 'Google is not showing your products yet',
+    lead: 'Merchant Center needs a few things from you. Products wait in “Pending” until then.',
+    rows: account.reasons.map(({ title, program, countries, action, documentation }) => ({
+      title,
+      meta: [...(program ? [PROGRAMS[program]] : []), countries.map((c) => COUNTRY_NAMES.get(c) ?? c).join(', ')].filter(Boolean).join(' · '),
+      action,
+      documentation,
+    })),
+    merchantUrl: account.merchant_url,
+  };
+}
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
@@ -101,6 +139,7 @@ export function dashboardModel(view: DashboardView, now: number): DashboardModel
       sampleText: `${count(products, 'product')}${samples.length > 0 ? `: ${samples.slice(0, 3).map((sample) => sample.name).join(', ')}` : ''}`,
     })),
     refreshedText: view.summary ? `Statuses checked ${ago(Date.parse(view.summary.date_refreshed), now)}` : 'Statuses are checked within the hour',
+    account: accountOf(view),
     canSyncAll: connected && view.full_sync?.status !== 'running',
     canRefresh: connected && view.refresh?.status !== 'running',
   };
