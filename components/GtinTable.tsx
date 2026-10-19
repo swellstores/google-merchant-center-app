@@ -1,7 +1,19 @@
 import type { ComponentProps } from '@swell/apps-sdk/components';
-import { useEffect } from 'preact/hooks';
-import { APP_ID } from './lib/api';
-import { editRow, gtinProblem, gtinTableModel, tableValidity, type GtinRow, type Identifiers } from './lib/gtin-table';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { APP_ID, callRoute } from './lib/api';
+import { latestWins } from './lib/brand-input';
+import {
+  editRow,
+  gtinProblem,
+  gtinTableModel,
+  tableValidity,
+  variantList,
+  variantPage,
+  variantsNote,
+  type GtinRow,
+  type Identifiers,
+  type VariantList,
+} from './lib/gtin-table';
 import { Notice, Root, Stack } from './lib/ui';
 
 export const config = { description: 'Barcodes and part numbers per variant' };
@@ -18,9 +30,31 @@ const SCROLL = `
 `;
 
 export default function GtinTable(props: ComponentProps) {
-  const record = (props.context?.record ?? {}) as { variants?: unknown; $app?: Record<string, any> };
+  const record = (props.context?.record ?? {}) as { id?: string; variants?: unknown; $app?: Record<string, any> };
   const value = (props.value ?? null) as Identifiers | null;
-  const model = gtinTableModel(record, value, APP_ID);
+  const page = variantPage(record);
+  const [loaded, setLoaded] = useState<VariantList | null>(null);
+  const [failed, setFailed] = useState(false);
+  const loads = useRef(latestWins());
+  const wantsAll = Boolean(record.id && page);
+
+  useEffect(() => {
+    if (!wantsAll) return;
+    const ticket = loads.current.start();
+    callRoute<unknown>(props.fetch, `product?id=${encodeURIComponent(record.id!)}&view=variants`)
+      .then((answer) => {
+        const list = variantList(answer);
+        loads.current.accept(ticket, () => (list?.variants.length ? setLoaded(list) : setFailed(true)));
+      })
+      .catch(() => loads.current.accept(ticket, () => setFailed(true)));
+    // An unmount counts as a newer start, so a late answer is dropped.
+    return () => {
+      loads.current.start();
+    };
+  }, [record.id, wantsAll]);
+
+  const model = gtinTableModel(record, value, APP_ID, loaded?.variants);
+  const shownNote = variantsNote(page, loaded, failed);
   const validity = tableValidity(model);
   const locked = model.disabled || Boolean(props.readonly);
 
@@ -42,6 +76,7 @@ export default function GtinTable(props: ComponentProps) {
       <style>{SCROLL}</style>
       <Stack gap={8}>
         {model.note && <span class="gmc-muted">{model.note}</span>}
+        {shownNote && <span class="gmc-muted">{shownNote}</span>}
         <div class={scrolls ? 'gmc-gtin-scroll' : undefined}>
           <table class={model.disabled ? 'gmc-gtin off' : 'gmc-gtin'}>
             <thead>

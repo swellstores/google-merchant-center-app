@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editRow, gtinTableModel, setCell, tableValidity } from '../../../components/lib/gtin-table';
+import { editRow, gtinTableModel, setCell, tableValidity, variantList, variantPage, variantsNote } from '../../../components/lib/gtin-table';
 import type { Market } from '../../../functions/lib/connection/markets';
 import { buildOffers } from '../../../functions/lib/mapping/offers';
 import type { SwellProduct } from '../../../functions/lib/mapping/types';
@@ -93,6 +93,67 @@ describe('gtinTableModel', () => {
     const model = gtinTableModel({ $app: undefined }, null, APP);
     expect(model.rows).toHaveLength(1);
     expect(model.rows[0].label).toBe('This product');
+  });
+
+  it('builds the variant rows from the full list once it is loaded', () => {
+    const record = { variants: { count: 30, results: [VARIANTS[0], VARIANTS[1]] } };
+    const all = [...VARIANTS, ...Array.from({ length: 26 }, (_, i) => ({ id: `w${i}`, name: `W${i}`, active: true }))];
+    const model = gtinTableModel(record, { w7: { gtin: '4006381333931' } }, APP, all);
+    expect(model.rows).toHaveLength(1 + 28);
+    expect(model.rows.map((r) => r.key).slice(0, 4)).toEqual(['product', 'v1', 'v2', 'w0']);
+    expect(model.rows.find((r) => r.key === 'w7')?.gtin).toBe('4006381333931');
+    expect(gtinTableModel(record, null, APP, null).rows.map((r) => r.key)).toEqual(['product', 'v1', 'v2']);
+    expect(gtinTableModel(record, null, APP, []).rows.map((r) => r.key)).toEqual(['product', 'v1', 'v2']);
+  });
+});
+
+describe('variantPage', () => {
+  it('reads the page of variants the admin hands over', () => {
+    const page = (count: number, shown: number) => ({ variants: { count, results: VARIANTS.slice(0, shown) } });
+    expect(variantPage(page(40, 2))).toEqual({ shown: 2, total: 40 });
+    expect(variantPage(page(2, 2))).toBeNull();
+    expect(variantPage(page(1, 2))).toBeNull();
+  });
+
+  it('is null when the record holds every variant or none', () => {
+    expect(variantPage({ variants: VARIANTS })).toBeNull();
+    expect(variantPage({ variants: { results: VARIANTS } })).toBeNull();
+    expect(variantPage({})).toBeNull();
+    expect(variantPage({ variants: null })).toBeNull();
+  });
+});
+
+describe('variantList', () => {
+  it('reads the route’s answer', () => {
+    const variants = [{ id: 'v1', name: 'S', active: true }];
+    expect(variantList({ variants, total: 40 })).toEqual({ variants, total: 40 });
+    expect(variantList({ variants })).toEqual({ variants, total: 1 });
+  });
+
+  it('is null for an answer without a list', () => {
+    expect(variantList(null)).toBeNull();
+    expect(variantList({ total: 3 })).toBeNull();
+    expect(variantList({ variants: 'v1' })).toBeNull();
+  });
+});
+
+describe('variantsNote', () => {
+  const page = { shown: 25, total: 40 };
+
+  it('says how many variants the table shows until the rest arrive', () => {
+    expect(variantsNote(page, null, false)).toBe('Showing 25 of 40 variants.');
+    expect(variantsNote(page, null, true)).toBe('Showing 25 of 40 variants. Could not load the rest.');
+  });
+
+  it('says nothing once every variant is loaded, or when the page holds them all', () => {
+    const variants = Array.from({ length: 40 }, (_, i) => ({ id: `v${i}` }));
+    expect(variantsNote(page, { variants, total: 40 }, false)).toBeNull();
+    expect(variantsNote(null, null, false)).toBeNull();
+  });
+
+  it('names the cap when the product has more variants than the list holds', () => {
+    const variants = Array.from({ length: 500 }, (_, i) => ({ id: `v${i}` }));
+    expect(variantsNote(page, { variants, total: 612 }, false)).toBe('Showing 500 of 612 variants.');
   });
 });
 

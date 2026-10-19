@@ -97,7 +97,8 @@ export interface FakeBatchOp {
 }
 
 /**
- * In-memory Swell store with the app's collections, products, `/:details` and
+ * In-memory Swell store with the app's collections, products (and the GET of
+ * `/products/<id>/variants`), `/:details` and
  * `POST /:batch`. A batch applies its operations in order without going through
  * the spied methods, so their calls are the round trips the code made.
  */
@@ -126,9 +127,25 @@ export function createFakeSwell(init: FakeSwellInit = {}) {
     if (message) throw new Error(message);
   };
 
+  const listed = (list: Doc[], query: Doc) => {
+    let docs = list.filter((d) => matches(d, query.where));
+    // Code-unit order, the same order `$gt` compares in.
+    const byField = (field: string) => (a: Doc, b: Doc) => (String(a[field]) < String(b[field]) ? -1 : String(a[field]) > String(b[field]) ? 1 : 0);
+    if (query.sort === 'id asc') docs = [...docs].sort(byField('id'));
+    if (query.sort === 'date_created asc') docs = [...docs].sort(byField('date_created'));
+    if (query.sort === 'name asc') docs = [...docs].sort(byField('name'));
+    return { count: docs.length, results: docs.slice(0, query.limit ?? 15).map((d) => structuredClone(d)) };
+  };
+
   const impl = {
     get: async (url: string, query: Doc = {}) => {
       if (url === '/:details') return structuredClone(details);
+      // A product's variants, the child collection, read from the product record itself.
+      const child = url.match(/^\/products\/([^/]+)\/variants$/);
+      if (child) {
+        const variants = collections['/products'].find((d) => d.id === child[1])?.variants;
+        return listed(Array.isArray(variants) ? variants : (variants?.results ?? []), query);
+      }
       const parts = split(url);
       const list = parts && collections[parts.name];
       if (!list) throw new Error(`unexpected GET ${url}`);
@@ -136,12 +153,7 @@ export function createFakeSwell(init: FakeSwellInit = {}) {
         const doc = list.find((d) => d.id === parts.id);
         return doc ? structuredClone(doc) : null;
       }
-      let docs = list.filter((d) => matches(d, query.where));
-      // Code-unit order, the same order `$gt` compares in.
-      const byField = (field: string) => (a: Doc, b: Doc) => (String(a[field]) < String(b[field]) ? -1 : String(a[field]) > String(b[field]) ? 1 : 0);
-      if (query.sort === 'id asc') docs = [...docs].sort(byField('id'));
-      if (query.sort === 'date_created asc') docs = [...docs].sort(byField('date_created'));
-      return { count: docs.length, results: docs.slice(0, query.limit ?? 15).map((d) => structuredClone(d)) };
+      return listed(list, query);
     },
     post: async (url: string, data: Doc) => {
       const list = collections[url];

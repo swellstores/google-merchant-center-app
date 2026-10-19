@@ -19,6 +19,12 @@ export interface GtinTableModel {
   note: string | null;
 }
 
+/** Every variant of the product, as the product route's `view=variants` answers it. */
+export interface VariantList {
+  variants: SwellVariant[];
+  total: number;
+}
+
 const SHARED = 'product';
 
 function liveVariants(variants: unknown): SwellVariant[] {
@@ -26,10 +32,42 @@ function liveVariants(variants: unknown): SwellVariant[] {
   return list.filter((v) => v.active !== false && !v.archived);
 }
 
-export function gtinTableModel(record: { variants?: unknown; $app?: Record<string, any> }, value: Identifiers | null, appId: string): GtinTableModel {
+/**
+ * The admin hands the edit page's current page of variants, `{ count, results }`
+ * (25 by name, archived left out). Null when that page holds them all.
+ */
+export function variantPage(record: { variants?: unknown }): { shown: number; total: number } | null {
+  const variants = record.variants as { count?: unknown; results?: unknown } | null | undefined;
+  if (!variants || typeof variants !== 'object' || Array.isArray(variants)) return null;
+  const shown = Array.isArray(variants.results) ? variants.results.length : 0;
+  const total = typeof variants.count === 'number' ? variants.count : shown;
+  return total > shown ? { shown, total } : null;
+}
+
+export function variantList(answer: unknown): VariantList | null {
+  const { variants, total } = (answer ?? {}) as { variants?: unknown; total?: unknown };
+  if (!Array.isArray(variants)) return null;
+  const list = variants.filter((v): v is SwellVariant => typeof v?.id === 'string');
+  return { variants: list, total: typeof total === 'number' ? total : list.length };
+}
+
+/** The muted line under the table while it shows only some of the variants. */
+export function variantsNote(page: { shown: number; total: number } | null, loaded: VariantList | null, failed: boolean): string | null {
+  if (loaded) return loaded.total > loaded.variants.length ? `Showing ${loaded.variants.length} of ${loaded.total} variants.` : null;
+  if (!page) return null;
+  return `Showing ${page.shown} of ${page.total} variants.${failed ? ' Could not load the rest.' : ''}`;
+}
+
+/** `allVariants`: the full list once loaded, which replaces the record's page of variants. */
+export function gtinTableModel(
+  record: { variants?: unknown; $app?: Record<string, any> },
+  value: Identifiers | null,
+  appId: string,
+  allVariants?: SwellVariant[] | null,
+): GtinTableModel {
   const fields = record.$app?.[appId] ?? {};
   const disabled = fields.identifier_exists === false;
-  const variants = liveVariants(record.variants);
+  const variants = liveVariants(allVariants?.length ? allVariants : record.variants);
   const shared = value?.[SHARED];
   // The legacy top-level MPN stands in for the shared one until the shared row is first written (or cleared to null).
   const legacyApplies = !(value && SHARED in value);
