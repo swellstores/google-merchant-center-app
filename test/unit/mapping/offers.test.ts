@@ -162,6 +162,23 @@ describe('buildOffers', () => {
     expect(buildOffers(MUG, [MARKET], OPTS).offers[0].input.productAttributes.identifierExists).toBeUndefined();
   });
 
+  it('sends neither gtins nor mpn when identifier_exists is off', () => {
+    const product = {
+      ...MUG,
+      $app: {
+        [APP]: {
+          identifiers: { v1: { gtin: '4006381333931', mpn: 'X1' }, product: { gtin: '0012345678905' } },
+          mpn: 'TOP',
+          identifier_exists: false,
+        },
+      },
+    };
+    const attributes = buildOffers(product, [MARKET], OPTS).offers[0].input.productAttributes;
+    expect(attributes.identifierExists).toBe(false);
+    expect(attributes.gtins).toBeUndefined();
+    expect(attributes.mpn).toBeUndefined();
+  });
+
   it('uses the default brand and condition', () => {
     const [offer] = buildOffers(MUG, [MARKET], { ...OPTS, defaults: { brand: 'Test store', condition: 'used' } }).offers;
     expect(offer.input.productAttributes).toMatchObject({ brand: 'Test store', condition: 'USED' });

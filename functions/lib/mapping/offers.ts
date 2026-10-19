@@ -78,6 +78,7 @@ function buildInput(
   const shared = fields.identifiers?.product;
   const gtin = (variant ? own?.gtin : shared?.gtin)?.trim();
   const mpn = own?.mpn?.trim() || shared?.mpn?.trim() || fields.mpn?.trim() || undefined;
+  const noIdentifiers = fields.identifier_exists === false;
   const tracked = Boolean(product.stock_tracking);
   const level = (variant ? variant.stock_level : product.stock_level) ?? 0;
 
@@ -98,9 +99,9 @@ function buildInput(
     salePrice: sale !== null ? money(sale, market.currency) : undefined,
     condition: (fields.condition ?? opts.defaults.condition).toUpperCase() as ProductAttributes['condition'],
     brand: fields.brand?.trim() || opts.defaults.brand || undefined,
-    mpn,
-    gtins: gtin ? [gtin] : undefined,
-    identifierExists: fields.identifier_exists === false ? false : undefined,
+    mpn: noIdentifiers ? undefined : mpn,
+    gtins: gtin && !noIdentifiers ? [gtin] : undefined,
+    identifierExists: noIdentifiers ? false : undefined,
     googleProductCategory: fields.google_category?.trim() || undefined,
     itemGroupId: variant ? product.id : undefined,
     ageGroup: fields.age_group ? fields.age_group.toUpperCase() : undefined,
