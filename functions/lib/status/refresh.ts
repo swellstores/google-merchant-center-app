@@ -10,6 +10,7 @@ import { enqueueWrite } from '../sync/queue';
 import { iso } from '../time';
 import {
   earliestExpiry,
+  issueKey,
   partlyRefused,
   productStatus,
   SEVERITY_ORDER,
@@ -30,6 +31,8 @@ export interface StatusCounters {
 
 export interface IssueTally {
   code: string;
+  /** Google's attribute: one code makes a tally per attribute */
+  attribute?: string;
   severity: StatusIssue['severity'];
   description: string;
   documentation?: string;
@@ -146,7 +149,7 @@ function resendDue(offers: OfferAnswer[], fields: GoogleFields, now: number): bo
 const outranks = (a: Pick<IssueTally, 'severity' | 'products'>, b: Pick<IssueTally, 'severity' | 'products'>) =>
   SEVERITY_ORDER[a.severity] < SEVERITY_ORDER[b.severity] || (a.severity === b.severity && a.products > b.products);
 
-/** Where a new code goes: a free place, or the place of the least important tally when the new code outranks it; -1 for none. */
+/** Where a new issue goes: a free place, or the place of the least important tally when the new issue outranks it; -1 for none. */
 function placeFor(tallies: IssueTally[], issue: StatusIssue): number {
   if (tallies.length < MAX_TALLIES) return tallies.length;
   const weakest = tallies.reduce((at, t, i) => (outranks(tallies[at], t) ? i : at), 0);
@@ -155,11 +158,12 @@ function placeFor(tallies: IssueTally[], issue: StatusIssue): number {
 
 function tally(tallies: IssueTally[], product: SwellProduct, issues: StatusIssue[]): void {
   for (const issue of issues) {
-    let entry = tallies.find((t) => t.code === issue.code);
+    let entry = tallies.find((t) => issueKey(t) === issueKey(issue));
     if (!entry) {
       const at = placeFor(tallies, issue);
       if (at < 0) continue;
       entry = { code: issue.code, severity: issue.severity, description: issue.description, products: 0, samples: [] };
+      if (issue.attribute) entry.attribute = issue.attribute;
       if (issue.documentation) entry.documentation = issue.documentation;
       tallies[at] = entry;
     }

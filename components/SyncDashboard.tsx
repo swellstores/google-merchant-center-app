@@ -153,7 +153,7 @@ export default function SyncDashboard(props: ComponentProps) {
             <h3 class="gmc-title">Top issues</h3>
             <Stack as="ul" gap={16} divided>
               {model.issues.map((issue) => (
-                <li key={issue.code}>
+                <li key={issue.key}>
                   <Stack gap={4}>
                     <div class="gmc-actions">
                       <Pill tone={issue.severity.tone}>{issue.severity.label}</Pill>

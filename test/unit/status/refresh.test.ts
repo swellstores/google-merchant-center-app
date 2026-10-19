@@ -409,6 +409,23 @@ describe('status refresh pass', () => {
     ]);
   });
 
+  it("a product missing two attributes under one code counts once per attribute row, and appears once in each row's samples", async () => {
+    const missing = (...attributes: string[]): GoogleProductStatus => ({
+      destinationStatuses: [{ reportingContext: 'SHOPPING_ADS', disapprovedCountries: ['US'] }],
+      itemLevelIssues: attributes.map((attribute) => ({
+        code: 'item_missing_required_attribute', severity: 'DISAPPROVED', attribute, description: `Missing value [${attribute}]`,
+      })),
+      googleExpirationDate: iso(NOW + 30 * DAY),
+    });
+    const { env } = setup([product(1), product(2)], { statuses: { [offerOf(1)]: missing('color', 'size'), [offerOf(2)]: missing('size') } });
+    const pass = await statusRefreshPass(env, newStatusRefreshJob(NOW));
+    const row = { code: 'item_missing_required_attribute', severity: 'disapproved' };
+    expect(pass.job.issues).toEqual([
+      { ...row, attribute: 'color', description: 'Missing value [color]', products: 1, samples: [{ id: idOf(1), name: 'P1' }] },
+      { ...row, attribute: 'size', description: 'Missing value [size]', products: 2, samples: [{ id: idOf(1), name: 'P1' }, { id: idOf(2), name: 'P2' }] },
+    ]);
+  });
+
   it('a disapproved code seen after 30 info codes reaches the tally', async () => {
     const infos: IssueTally[] = Array.from({ length: MAX_TALLIES }, (_, i) => ({
       code: `info_${i}`, severity: 'info', description: 'i', products: i === 7 ? 1 : 2, samples: [],

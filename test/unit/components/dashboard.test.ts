@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dashboardModel, type DashboardView } from '../../../components/lib/dashboard';
+import { dashboardModel, type DashboardView, type IssueTally } from '../../../components/lib/dashboard';
 
 const NOW = Date.parse('2026-10-16T12:00:00Z');
 const COUNTERS = { approved: 10, partial: 2, pending: 3, disapproved: 4, not_sent: 5, excluded: 6 };
@@ -117,6 +117,17 @@ describe('dashboardModel', () => {
     const model = dashboardModel(view({ summary: { ...summary('2026-10-16T11:59:30Z'), top_issues: [{ ...issue('disapproved'), documentation: 'https://g.co/x' }] } }), NOW);
     expect(model.issues[0]).toMatchObject({ code: 'disapproved', description: 'Bad', documentation: 'https://g.co/x' });
     expect(model.refreshedText).toBe('Statuses checked just now');
+  });
+
+  it('one code over two attributes makes two rows with their own keys and titles', () => {
+    const missing = (attribute: string): IssueTally => ({ ...issue('disapproved'), code: 'missing', attribute, description: `Missing value [${attribute}]` });
+    const top_issues = [missing('color'), missing('size'), issue('info')];
+    const rows = dashboardModel(view({ summary: { ...summary('2026-10-16T11:59:30Z'), top_issues } }), NOW).issues;
+    expect(rows.map((row) => [row.key, row.description])).toEqual([
+      ['missing|color', 'Missing value [color]'],
+      ['missing|size', 'Missing value [size]'],
+      ['info|', 'Bad'],
+    ]);
   });
 
   it('no stored reasons, no card', () => {

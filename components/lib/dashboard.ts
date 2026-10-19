@@ -14,6 +14,7 @@ export interface StatusCounters {
 
 export interface IssueTally {
   code: string;
+  attribute?: string;
   severity: 'disapproved' | 'demoted' | 'review' | 'info';
   description: string;
   documentation?: string;
@@ -51,7 +52,7 @@ export interface DashboardModel {
   progress: { label: string; done: number; total: number | null }[];
   /** The courier's backlog is a count, not progress */
   queueText: string | null;
-  issues: { code: string; description: string; documentation?: string; severity: { tone: Tone; label: string }; sampleText: string }[];
+  issues: { key: string; code: string; description: string; documentation?: string; severity: { tone: Tone; label: string }; sampleText: string }[];
   refreshedText: string | null;
   /** The warning card: why Google holds the products */
   account: {
@@ -79,6 +80,9 @@ export const SEVERITIES: Record<IssueTally['severity'], { tone: Tone; label: str
   review: { tone: 'neutral', label: 'In review' },
   info: { tone: 'neutral', label: 'Info' },
 };
+
+/** Mirrors `issueKey` in functions/lib/status/product-status.ts: one code can make a row per attribute. */
+export const issueKey = (issue: { code: string; attribute?: string }) => `${issue.code}|${issue.attribute ?? ''}`;
 
 const COUNTRY_NAMES = new Map(COUNTRIES);
 const PROGRAMS: Record<NonNullable<AccountReason['program']>, string> = { 'free-listings': 'Free listings', 'shopping-ads': 'Shopping ads' };
@@ -131,7 +135,8 @@ export function dashboardModel(view: DashboardView, now: number): DashboardModel
     stats: STATS.map((stat) => ({ ...stat, value: counters ? counters[stat.key] : null })),
     progress,
     queueText: view.queue > 0 ? `${count(view.queue, 'product')} waiting to send` : null,
-    issues: (view.summary?.top_issues ?? []).map(({ code, description, documentation, severity, products, samples }) => ({
+    issues: (view.summary?.top_issues ?? []).map(({ code, attribute, description, documentation, severity, products, samples }) => ({
+      key: issueKey({ code, attribute }),
       code,
       description,
       ...(documentation ? { documentation } : {}),
