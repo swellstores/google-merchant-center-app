@@ -73,9 +73,9 @@ export function needNote(row: Pick<NeedRow, 'kind' | 'asked' | 'chosen' | 'missi
   return { text: 'Google rechecks this after the next sync.', tone: 'muted' };
 }
 
-/** The line a row without a select shows instead. The age group and gender fields sit in the row after this block. */
+/** The line a row without a select shows instead. The age group and gender fields sit in a row above this block. */
 export function needHint(row: Pick<NeedRow, 'kind' | 'label'>): string | null {
-  if (row.kind === 'field') return `Set “${row.label}” below.`;
+  if (row.kind === 'field') return `Set “${row.label}” above.`;
   if (row.kind === 'create') return `Create a variant option for the ${row.label.toLowerCase()} on the Options tab, then pick it here.`;
   return null;
 }

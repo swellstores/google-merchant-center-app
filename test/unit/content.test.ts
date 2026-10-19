@@ -53,14 +53,14 @@ describe('products content, Google tab', () => {
       'excluded',
       ['brand', 'condition'],
       'google_category',
+      ['age_group', 'gender'],
       'no_identifiers',
       'mpn',
       'identifiers',
       'attribute_options',
-      ['age_group', 'gender'],
       ['status_panel', 'preview'],
     ]);
-    for (const i of [1, 7, 8]) expect(tab.fields[i].type).toBe('field_row');
+    for (const i of [1, 3, 8]) expect(tab.fields[i].type).toBe('field_row');
     expect(flatten(tab.fields).some((f) => f.type === 'field_group')).toBe(false);
   });
 

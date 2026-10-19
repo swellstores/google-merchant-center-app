@@ -124,10 +124,10 @@ describe('needNote', () => {
 });
 
 describe('needHint', () => {
-  it('points a field row to its field below the block', () => {
+  it('points a field row to its field above the block', () => {
     const [ageGroup, gender] = needRows(record(['gender', 'age_group']), null, APP);
-    expect(needHint(ageGroup)).toBe('Set “Age group” below.');
-    expect(needHint(gender)).toBe('Set “Gender” below.');
+    expect(needHint(ageGroup)).toBe('Set “Age group” above.');
+    expect(needHint(gender)).toBe('Set “Gender” above.');
   });
 
   it('asks to create an option, and gives an option row no hint', () => {

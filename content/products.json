@@ -104,11 +104,11 @@
             { "id": "excluded" },
             { "type": "field_row", "fields": [{ "id": "brand", "admin_span": 2 }, { "id": "condition", "admin_span": 2 }] },
             { "id": "google_category" },
+            { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] },
             { "id": "no_identifiers" },
             { "id": "mpn" },
             { "id": "identifiers" },
             { "id": "attribute_options" },
-            { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] },
             {
               "type": "field_row",
               "fields": [
