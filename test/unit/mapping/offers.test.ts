@@ -121,47 +121,38 @@ describe('buildOffers', () => {
     expect(blue.input.productAttributes.gtins).toBeUndefined();
   });
 
-  it('uses the product-level GTIN for a product without variants', () => {
+  it('takes the GTIN of a product without variants from the table and its MPN from the field above', () => {
     const product: SwellProduct = {
       ...MUG,
-      $app: { [APP]: { identifiers: { product: { gtin: '0012345678905', mpn: 'MUG-1' } } } },
+      $app: { [APP]: { mpn: ' MUG-1 ', identifiers: { product: { gtin: '0012345678905' } } } },
     };
     const [offer] = buildOffers(product, [MARKET], OPTS).offers;
     expect(offer.input.productAttributes).toMatchObject({ gtins: ['0012345678905'], mpn: 'MUG-1' });
   });
 
-  it('falls back field by field for a variant', () => {
+  it('falls back from a variant’s own MPN to the product’s MPN', () => {
     const product: SwellProduct = {
       ...SHIRT,
-      $app: {
-        [APP]: {
-          mpn: 'TS-1',
-          identifiers: { v1: { mpn: 'TS-RED-M' }, product: { gtin: '0012345678905', mpn: 'TS-SHARED' } },
-        },
-      },
+      $app: { [APP]: { mpn: 'TS-1', identifiers: { v1: { mpn: 'TS-RED-M' }, v2: { mpn: '  ' } } } },
     };
     const [red, blue] = buildOffers(product, [MARKET], OPTS).offers;
     expect(red.input.productAttributes).toMatchObject({ mpn: 'TS-RED-M' });
-    expect(red.input.productAttributes.gtins).toBeUndefined();
-    expect(blue.input.productAttributes).toMatchObject({ mpn: 'TS-SHARED' });
-    expect(blue.input.productAttributes.gtins).toBeUndefined();
+    expect(blue.input.productAttributes).toMatchObject({ mpn: 'TS-1' });
+    const without = buildOffers({ ...SHIRT, $app: { [APP]: { identifiers: { v1: { mpn: 'TS-RED-M' } } } } }, [MARKET], OPTS).offers;
+    expect(without.map((o) => o.input.productAttributes.mpn)).toEqual(['TS-RED-M', undefined]);
   });
 
-  it('the legacy MPN is still sent while the shared row was never written', () => {
-    for (const identifiers of [undefined, {}, { v1: { gtin: '4006381333931' } }]) {
-      const product: SwellProduct = { ...SHIRT, $app: { [APP]: { mpn: ' OLD ', identifiers } } };
-      expect(buildOffers(product, [MARKET], OPTS).offers.map((o) => o.input.productAttributes.mpn)).toEqual(['OLD', 'OLD']);
+  it('ignores the old shared row’s MPN, and its GTIN for variants', () => {
+    const shirt: SwellProduct = {
+      ...SHIRT,
+      $app: { [APP]: { mpn: 'TS-1', identifiers: { product: { gtin: '0012345678905', mpn: 'TS-SHARED' } } } },
+    };
+    for (const offer of buildOffers(shirt, [MARKET], OPTS).offers) {
+      expect(offer.input.productAttributes.mpn).toBe('TS-1');
+      expect(offer.input.productAttributes.gtins).toBeUndefined();
     }
-    expect(buildOffers({ ...MUG, $app: { [APP]: { mpn: 'OLD' } } }, [MARKET], OPTS).offers[0].input.productAttributes.mpn).toBe('OLD');
-  });
-
-  it('clearing the shared MPN stops sending the legacy MPN', () => {
-    const shirt: SwellProduct = { ...SHIRT, $app: { [APP]: { mpn: 'OLD', identifiers: { product: null } } } };
-    expect(buildOffers(shirt, [MARKET], OPTS).offers.map((o) => o.input.productAttributes.mpn)).toEqual([undefined, undefined]);
-    const mug: SwellProduct = { ...MUG, $app: { [APP]: { mpn: 'OLD', identifiers: { product: null } } } };
+    const mug: SwellProduct = { ...MUG, $app: { [APP]: { identifiers: { product: { mpn: 'MUG-SHARED' } } } } };
     expect(buildOffers(mug, [MARKET], OPTS).offers[0].input.productAttributes.mpn).toBeUndefined();
-    const own: SwellProduct = { ...SHIRT, $app: { [APP]: { mpn: 'OLD', identifiers: { product: null, v1: { mpn: 'RED' } } } } };
-    expect(buildOffers(own, [MARKET], OPTS).offers.map((o) => o.input.productAttributes.mpn)).toEqual(['RED', undefined]);
   });
 
   it('reads cleared (null) entries and cells as empty', () => {
@@ -193,12 +184,8 @@ describe('buildOffers', () => {
     expect(attributes({ no_identifiers: true }).identifierExists).toBe(false);
     expect(attributes({}).identifierExists).toBeUndefined();
     expect(attributes({ no_identifiers: false }).identifierExists).toBeUndefined();
-  });
-
-  it('honours a legacy identifier_exists off until the new switch is set', () => {
-    const attributes = (fields: object) => buildOffers({ ...MUG, $app: { [APP]: fields } }, [MARKET], OPTS).offers[0].input.productAttributes;
-    expect(attributes({ identifier_exists: false }).identifierExists).toBe(false);
-    expect(attributes({ identifier_exists: false, no_identifiers: false }).identifierExists).toBeUndefined();
+    // The old field is no longer read
+    expect(attributes({ identifier_exists: false }).identifierExists).toBeUndefined();
   });
 
   it('sends neither gtins nor mpn when the product has no identifiers', () => {

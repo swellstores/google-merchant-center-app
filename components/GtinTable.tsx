@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { APP_ID, callRoute } from './lib/api';
 import { latestWins } from './lib/latest-wins';
 import {
-  editRow,
   gtinProblem,
   gtinTableModel,
+  setCell,
   tableValidity,
   variantList,
   variantPage,
@@ -14,20 +14,46 @@ import {
   type Identifiers,
   type VariantList,
 } from './lib/gtin-table';
-import { Notice, Root, Stack } from './lib/ui';
+import { Root, Stack } from './lib/ui';
 
 export const config = { description: 'Barcodes and part numbers per variant' };
 
-const SCROLL = `
+const CSS = `
 .gmc-gtin-scroll { overflow: auto; max-height: 640px; }
-.gmc-gtin { width: 100%; border-collapse: collapse; }
+.gmc-gtin { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .gmc-gtin th { text-align: left; font-weight: 600; color: var(--muted); padding: 0 8px 8px 0; }
-.gmc-gtin td { padding: 4px 8px 4px 0; vertical-align: middle; }
-.gmc-gtin td:first-child { min-width: 120px; }
+.gmc-gtin td { padding: 8px 8px 8px 0; vertical-align: top; }
+.gmc-gtin tbody tr + tr > td { border-top: 1px solid var(--border); }
+.gmc-gtin .gmc-gtin-variant { padding-top: 16px; overflow-wrap: anywhere; }
+.gmc-gtin-caption { font-weight: 600; color: var(--muted); }
+.gmc-gtin-field { display: flex; flex-direction: column; gap: 4px; }
 .gmc-input.bad { border-color: var(--bad); }
-.gmc-gtin.off { opacity: .55; }
-.gmc-gtin.off .gmc-input { cursor: not-allowed; }
+.gmc-gtin-reason { color: var(--bad); font-size: 12px; }
 `;
+
+function GtinInput(props: { row: GtinRow; label: string; readonly: boolean; onInput: (text: string) => void }) {
+  const problem = gtinProblem(props.row);
+  const reasonId = `gmc-gtin-reason-${props.row.key}`;
+  return (
+    <div class="gmc-gtin-field">
+      <input
+        class={problem ? 'gmc-input bad' : 'gmc-input'}
+        inputMode="numeric"
+        aria-label={props.label}
+        aria-invalid={problem !== null}
+        aria-describedby={problem ? reasonId : undefined}
+        value={props.row.gtin}
+        disabled={props.readonly}
+        onInput={(e) => props.onInput((e.currentTarget as HTMLInputElement).value)}
+      />
+      {problem && (
+        <span id={reasonId} class="gmc-gtin-reason">
+          {problem}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export default function GtinTable(props: ComponentProps) {
   const record = (props.context?.record ?? {}) as { id?: string; variants?: unknown; $app?: Record<string, any> };
@@ -56,79 +82,78 @@ export default function GtinTable(props: ComponentProps) {
   const model = gtinTableModel(record, value, APP_ID, loaded?.variants);
   const shownNote = variantsNote(page, loaded, failed);
   const validity = tableValidity(model);
-  const locked = model.disabled || Boolean(props.readonly);
+  const readonly = Boolean(props.readonly);
 
   useEffect(() => {
     props.setValidity(validity);
   }, [validity]);
 
+  // The admin unmounts the table while "No barcode" hides it
   useEffect(() => () => props.setValidity(null), []);
 
   function change(row: GtinRow, cell: 'gtin' | 'mpn', text: string) {
-    props.setValue(editRow(value, row, cell, text));
+    props.setValue(setCell(value, row.key, cell, text));
   }
 
-  const problems = model.disabled ? [] : model.rows.map((row) => ({ key: row.key, text: gtinProblem(row) })).filter((p) => p.text);
-  const scrolls = model.rows.length > 20;
+  if (!model.perVariant) {
+    const [row] = model.rows;
+    return (
+      <Root>
+        <style>{CSS}</style>
+        <Stack gap={4}>
+          <span class="gmc-gtin-caption" aria-hidden="true">
+            GTIN
+          </span>
+          <GtinInput row={row} label="GTIN" readonly={readonly} onInput={(text) => change(row, 'gtin', text)} />
+        </Stack>
+      </Root>
+    );
+  }
 
   return (
     <Root>
-      <style>{SCROLL}</style>
+      <style>{CSS}</style>
       <Stack gap={8}>
-        {model.note && <span class="gmc-muted">{model.note}</span>}
         {shownNote && <span class="gmc-muted">{shownNote}</span>}
-        <div class={scrolls ? 'gmc-gtin-scroll' : undefined}>
-          <table class={model.disabled ? 'gmc-gtin off' : 'gmc-gtin'}>
-            <thead>
-              <tr>
-                <th scope="col">Variant</th>
-                <th scope="col">GTIN</th>
-                <th scope="col">MPN</th>
-              </tr>
-            </thead>
-            <tbody>
-              {model.rows.map((row) => {
-                const bad = !model.disabled && gtinProblem(row) !== null;
-                return (
+        {model.rows.length === 0 ? (
+          <span class="gmc-muted">This product has no active variants.</span>
+        ) : (
+          <div class={model.rows.length > 20 ? 'gmc-gtin-scroll' : undefined}>
+            <table class="gmc-gtin">
+              <colgroup>
+                <col style={{ width: '22%' }} />
+                <col />
+                <col />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">Variant</th>
+                  <th scope="col">GTIN</th>
+                  <th scope="col">MPN</th>
+                </tr>
+              </thead>
+              <tbody>
+                {model.rows.map((row) => (
                   <tr key={row.key}>
-                    <td>{row.label}</td>
+                    <td class="gmc-gtin-variant">{row.label}</td>
                     <td>
-                      {row.gtin === null ? (
-                        <span class="gmc-muted">Per variant</span>
-                      ) : (
-                        <input
-                          class={bad ? 'gmc-input bad' : 'gmc-input'}
-                          inputMode="numeric"
-                          aria-label={`GTIN of ${row.label}`}
-                          aria-invalid={bad}
-                          value={row.gtin}
-                          disabled={locked}
-                          onInput={(e) => change(row, 'gtin', (e.currentTarget as HTMLInputElement).value)}
-                        />
-                      )}
+                      <GtinInput row={row} label={`GTIN of ${row.label}`} readonly={readonly} onInput={(text) => change(row, 'gtin', text)} />
                     </td>
                     <td>
                       <input
                         class="gmc-input"
                         aria-label={`MPN of ${row.label}`}
-                        value={row.mpn}
+                        value={row.mpn ?? ''}
                         placeholder={row.mpnPlaceholder}
-                        disabled={locked}
+                        disabled={readonly}
                         onInput={(e) => change(row, 'mpn', (e.currentTarget as HTMLInputElement).value)}
                       />
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {problems.length > 0 && (
-          <Notice tone="bad">
-            {problems.map((p) => (
-              <div key={p.key}>{p.text}</div>
-            ))}
-          </Notice>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Stack>
     </Root>

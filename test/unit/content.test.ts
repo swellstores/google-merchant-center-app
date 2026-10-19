@@ -32,8 +32,9 @@ const hints: Record<string, string> = {
     'Optional. Google picks a category itself from the title and description; set it only to correct Google. Paste a category number or full path from the Google product taxonomy (search the web for "Google product taxonomy").',
   no_identifiers:
     'Turn on for handmade, custom or vintage products that have no barcode and no manufacturer part number. Otherwise Google expects a GTIN or an MPN with the brand.',
+  mpn: 'The manufacturer part number. Variants without their own MPN use this one.',
   identifiers:
-    "GTIN is the barcode number (UPC, EAN, ISBN). MPN is the manufacturer's part number. Give them per variant when the variants have their own.",
+    'GTIN is the barcode number (UPC, EAN, ISBN). Give each variant its own; an MPN here overrides the one above for that variant.',
   age_group:
     'Only for clothing and accessories: the age group the product is for. Google requires it for them.',
   gender:
@@ -51,11 +52,12 @@ describe('products content, Google tab', () => {
       ['brand', 'condition'],
       'google_category',
       'no_identifiers',
+      'mpn',
       'identifiers',
       ['age_group', 'gender'],
       ['status_panel', 'preview'],
     ]);
-    for (const i of [1, 5, 6]) expect(tab.fields[i].type).toBe('field_row');
+    for (const i of [1, 6, 7]) expect(tab.fields[i].type).toBe('field_row');
     expect(flatten(tab.fields).some((f) => f.type === 'field_group')).toBe(false);
   });
 
@@ -74,7 +76,7 @@ describe('products content, Google tab', () => {
     expect(byId('identifiers')).toMatchObject({
       type: 'component',
       component: 'GtinTable',
-      label: 'Barcodes and part numbers',
+      label: 'Barcodes',
     });
     expect(byId('status_panel')).toMatchObject({ type: 'component', component: 'GoogleStatus' });
     expect(byId('preview')).toMatchObject({ type: 'component', component: 'ShoppingPreview' });
@@ -123,8 +125,17 @@ describe('products content, Google tab', () => {
     }
   });
 
-  it('no longer defines mpn', () => {
-    expect(topFields.find((f) => f.id === 'mpn')).toBeUndefined();
-    expect(tabFields.find((f) => f.id === 'mpn')).toBeUndefined();
+  it('shows the product’s MPN as a native text field', () => {
+    expect(byId('mpn')).toMatchObject({ type: 'text', label: 'MPN' });
+    expect(byId('mpn').component).toBeUndefined();
+  });
+
+  // The admin hides them natively while the switch is on; the stored values stay
+  it('hides the MPN and the barcodes while "No barcode" is on', () => {
+    for (const id of ['mpn', 'identifiers']) {
+      expect(byId(id).conditions, id).toEqual({ no_identifiers: { $ne: true } });
+    }
+    const conditioned = tabFields.filter((f) => resolve(f).conditions).map((f) => f.id);
+    expect(conditioned).toEqual(['mpn', 'identifiers']);
   });
 });

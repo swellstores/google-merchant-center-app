@@ -67,11 +67,19 @@
       "hint": "Turn on for handmade, custom or vintage products that have no barcode and no manufacturer part number. Otherwise Google expects a GTIN or an MPN with the brand."
     },
     {
+      "id": "mpn",
+      "label": "MPN",
+      "type": "text",
+      "hint": "The manufacturer part number. Variants without their own MPN use this one.",
+      "conditions": { "no_identifiers": { "$ne": true } }
+    },
+    {
       "id": "identifiers",
-      "label": "Barcodes and part numbers",
+      "label": "Barcodes",
       "type": "component",
       "component": "GtinTable",
-      "hint": "GTIN is the barcode number (UPC, EAN, ISBN). MPN is the manufacturer's part number. Give them per variant when the variants have their own."
+      "hint": "GTIN is the barcode number (UPC, EAN, ISBN). Give each variant its own; an MPN here overrides the one above for that variant.",
+      "conditions": { "no_identifiers": { "$ne": true } }
     },
     { "id": "status_label", "label": "Google", "type": "short_text", "readonly": true },
     { "id": "date_status", "label": "Status checked", "type": "datetime", "readonly": true }
@@ -89,6 +97,7 @@
             { "type": "field_row", "fields": [{ "id": "brand", "admin_span": 2 }, { "id": "condition", "admin_span": 2 }] },
             { "id": "google_category" },
             { "id": "no_identifiers" },
+            { "id": "mpn" },
             { "id": "identifiers" },
             { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] },
             {

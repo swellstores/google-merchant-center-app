@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editRow, gtinTableModel, setCell, tableValidity, variantList, variantPage, variantsNote } from '../../../components/lib/gtin-table';
+import { gtinProblem, gtinTableModel, setCell, tableValidity, variantList, variantPage, variantsNote, type GtinRow } from '../../../components/lib/gtin-table';
 import type { Market } from '../../../functions/lib/connection/markets';
 import { buildOffers } from '../../../functions/lib/mapping/offers';
 import type { SwellProduct } from '../../../functions/lib/mapping/types';
@@ -17,109 +17,89 @@ const VARIANTS = [
 ];
 
 describe('gtinTableModel', () => {
-  it('a product without variants has one This product row', () => {
-    const model = gtinTableModel({}, { product: { gtin: '4006381333931' } }, APP);
-    expect(model.rows).toEqual([{ key: 'product', label: 'This product', gtin: '4006381333931', mpn: '', mpnPlaceholder: '' }]);
+  it('a product without variants has one GTIN cell and no MPN cell', () => {
+    const model = gtinTableModel({}, { product: { gtin: '4006381333931', mpn: 'OLD-SHARED' } }, APP);
+    expect(model.perVariant).toBe(false);
+    expect(model.rows).toEqual([{ key: 'product', label: 'This product', gtin: '4006381333931', mpn: null }]);
   });
 
-  it('variants get an All variants MPN row first', () => {
+  it('lists the live variants only, one row each', () => {
     const model = gtinTableModel({ variants: { results: VARIANTS } }, null, APP);
-    expect(model.rows.map((r) => [r.key, r.label, r.gtin])).toEqual([
-      ['product', 'All variants', null],
-      ['v1', 'S', ''],
-      ['v2', 'M', ''],
+    expect(model.perVariant).toBe(true);
+    expect(model.rows.map((r) => [r.key, r.label, r.gtin, r.mpn])).toEqual([
+      ['v1', 'S', '', ''],
+      ['v2', 'M', '', ''],
     ]);
-    expect(gtinTableModel({ variants: VARIANTS }, null, APP).rows).toHaveLength(3);
+    expect(gtinTableModel({ variants: VARIANTS }, null, APP).rows.map((r) => r.key)).toEqual(['v1', 'v2']);
+    expect(gtinTableModel({ variants: [{ id: 'v9', active: true }] }, null, APP).rows[0].label).toBe('v9');
   });
 
-  it('variant MPN placeholders show the shared MPN', () => {
-    const model = gtinTableModel({ variants: VARIANTS }, { product: { mpn: 'SHIRT' }, v2: { mpn: 'SHIRT-M' } }, APP);
-    expect(model.rows[0].mpn).toBe('SHIRT');
-    expect(model.rows[1]).toMatchObject({ mpn: '', mpnPlaceholder: 'SHIRT' });
-    expect(model.rows[2]).toMatchObject({ mpn: 'SHIRT-M', mpnPlaceholder: 'SHIRT' });
-  });
-
-  it('the legacy MPN shows as the shared value until the shared row is written', () => {
-    const record = { variants: VARIANTS, $app: { [APP]: { mpn: 'LEGACY' } } };
-    for (const value of [null, {}, { v1: { gtin: '4006381333931' } }]) {
-      const model = gtinTableModel(record, value, APP);
-      expect(model.rows[0]).toMatchObject({ key: 'product', mpn: 'LEGACY', mpnPlaceholder: '' });
-      expect(model.rows[1].mpnPlaceholder).toBe('LEGACY');
-    }
-    const written = gtinTableModel(record, { product: { mpn: 'NEW' } }, APP);
-    expect(written.rows[0].mpn).toBe('NEW');
-    expect(written.rows[1].mpnPlaceholder).toBe('NEW');
-    const cleared = gtinTableModel(record, setCell(null, 'product', 'mpn', ''), APP);
-    expect(cleared.rows[0].mpn).toBe('');
-    expect(cleared.rows[1].mpnPlaceholder).toBe('');
-
-    const single = { $app: { [APP]: { mpn: 'LEGACY' } } };
-    expect(gtinTableModel(single, null, APP).rows[0]).toMatchObject({ label: 'This product', mpn: 'LEGACY', mpnPlaceholder: '' });
-    expect(gtinTableModel(single, { product: null }, APP).rows[0].mpn).toBe('');
-  });
-
-  it('the first edit of This product keeps the legacy MPN it shows', () => {
-    const record = { $app: { [APP]: { mpn: 'LEGACY' } } };
-    const [row] = gtinTableModel(record, null, APP).rows;
-    const next = editRow(null, row, 'gtin', '4006381333931');
-    expect(next).toEqual({ product: { mpn: 'LEGACY', gtin: '4006381333931' } });
-    expect(gtinTableModel(record, next, APP).rows[0]).toMatchObject({ gtin: '4006381333931', mpn: 'LEGACY' });
-    expect(editRow(null, row, 'mpn', 'LEGACY-2')).toEqual({ product: { mpn: 'LEGACY-2' } });
-    expect(editRow(null, row, 'mpn', '')).toEqual({ product: null });
-    const [variantRow] = gtinTableModel({ variants: VARIANTS, $app: record.$app }, null, APP).rows.slice(1);
-    expect(editRow(null, variantRow, 'gtin', '4006381333931')).toEqual({ v1: { gtin: '4006381333931' } });
-  });
-
-  it('turning "No barcode" on keeps the values and disables the table', () => {
-    const value = { v1: { gtin: '4006381333931' } };
-    const model = gtinTableModel({ variants: VARIANTS, $app: { [APP]: { no_identifiers: true } } }, value, APP);
-    expect(model.disabled).toBe(true);
-    expect(model.note).toBe('Not sent while the switch above is on');
-    expect(model.rows[1].gtin).toBe('4006381333931');
-    expect(gtinTableModel({ variants: VARIANTS }, value, APP)).toMatchObject({ disabled: false, note: null });
-    expect(gtinTableModel({ variants: VARIANTS, $app: { [APP]: { identifier_exists: false } } }, value, APP).disabled).toBe(true);
-    expect(gtinTableModel({ variants: VARIANTS, $app: { [APP]: { identifier_exists: false, no_identifiers: false } } }, value, APP).disabled).toBe(false);
+  it('shows the product’s MPN as the placeholder of each variant’s MPN cell', () => {
+    const record = { variants: VARIANTS, $app: { [APP]: { mpn: 'SHIRT' } } };
+    const model = gtinTableModel(record, { product: { mpn: 'OLD-SHARED' }, v2: { mpn: 'SHIRT-M' } }, APP);
+    expect(model.rows[0]).toMatchObject({ key: 'v1', mpn: '', mpnPlaceholder: 'SHIRT' });
+    expect(model.rows[1]).toMatchObject({ key: 'v2', mpn: 'SHIRT-M', mpnPlaceholder: 'SHIRT' });
+    expect(gtinTableModel({ variants: VARIANTS }, null, APP).rows[0].mpnPlaceholder).toBe('');
+    expect(gtinTableModel({ variants: VARIANTS, $app: { [APP]: { mpn: null } } }, null, APP).rows[0].mpnPlaceholder).toBe('');
   });
 
   it('cleared (null) entries and cells show empty', () => {
-    const model = gtinTableModel({ variants: VARIANTS }, { product: { mpn: null }, v1: null, v2: { gtin: null, mpn: 'M-1' } }, APP);
+    const model = gtinTableModel({ variants: VARIANTS }, { v1: null, v2: { gtin: null, mpn: 'M-1' } }, APP);
     expect(model.rows.map((r) => [r.key, r.gtin, r.mpn])).toEqual([
-      ['product', null, ''],
       ['v1', '', ''],
       ['v2', '', 'M-1'],
     ]);
-    expect(gtinTableModel({}, { product: null }, APP).rows[0]).toMatchObject({ gtin: '', mpn: '' });
+    expect(gtinTableModel({}, { product: null }, APP).rows[0]).toMatchObject({ gtin: '', mpn: null });
+    expect(gtinTableModel({}, { product: { gtin: null } }, APP).rows[0].gtin).toBe('');
   });
 
-  it('a new product without an id renders the single row', () => {
+  it('a new product without an id renders the single cell', () => {
     const model = gtinTableModel({ $app: undefined }, null, APP);
-    expect(model.rows).toHaveLength(1);
-    expect(model.rows[0].label).toBe('This product');
+    expect(model.perVariant).toBe(false);
+    expect(model.rows).toEqual([{ key: 'product', label: 'This product', gtin: '', mpn: null }]);
   });
 
   it.each([
-    ['a mix of active, inactive and archived variants', VARIANTS, 'All variants'],
-    ['only inactive variants', [{ id: 'v4', name: 'Off', active: false }, { id: 'v5', name: 'Off too', active: false }], 'All variants'],
-    ['no variants', [], 'This product'],
-  ])('the table’s variant rows match the units buildOffers sends: %s', (_, variants, firstLabel) => {
+    ['a mix of active, inactive and archived variants', VARIANTS, true],
+    ['only inactive variants', [{ id: 'v4', name: 'Off', active: false }, { id: 'v5', name: 'Off too', active: false }], true],
+    ['no variants', [], false],
+  ])('the table’s rows match the units buildOffers sends: %s', (_, variants, perVariant) => {
     const product: SwellProduct = { id: PID, active: true, price: 10, images: [{ file: { url: 'https://cdn.example.com/a.jpg' } }], variants: { results: variants } };
     const model = gtinTableModel(product, null, APP);
-    const sentVariants = buildOffers(product, [MARKET], OPTS)
-      .offers.filter((offer) => offer.input.productAttributes.itemGroupId)
-      .map((offer) => offer.input.offerId);
-    expect(model.rows[0].label).toBe(firstLabel);
-    expect(model.rows.filter((row) => row.key !== 'product').map((row) => row.key)).toEqual(sentVariants);
+    const sent = buildOffers(product, [MARKET], OPTS).offers.map((offer) =>
+      offer.input.productAttributes.itemGroupId ? offer.input.offerId : 'product',
+    );
+    expect(model.perVariant).toBe(perVariant);
+    expect(model.rows.map((row) => row.key)).toEqual(sent);
   });
 
   it('builds the variant rows from the full list once it is loaded', () => {
     const record = { variants: { count: 30, results: [VARIANTS[0], VARIANTS[1]] } };
     const all = [...VARIANTS, ...Array.from({ length: 26 }, (_, i) => ({ id: `w${i}`, name: `W${i}`, active: true }))];
     const model = gtinTableModel(record, { w7: { gtin: '4006381333931' } }, APP, all);
-    expect(model.rows).toHaveLength(1 + 28);
-    expect(model.rows.map((r) => r.key).slice(0, 4)).toEqual(['product', 'v1', 'v2', 'w0']);
+    expect(model.rows).toHaveLength(28);
+    expect(model.rows.map((r) => r.key).slice(0, 3)).toEqual(['v1', 'v2', 'w0']);
     expect(model.rows.find((r) => r.key === 'w7')?.gtin).toBe('4006381333931');
-    expect(gtinTableModel(record, null, APP, null).rows.map((r) => r.key)).toEqual(['product', 'v1', 'v2']);
-    expect(gtinTableModel(record, null, APP, []).rows.map((r) => r.key)).toEqual(['product', 'v1', 'v2']);
+    expect(gtinTableModel(record, null, APP, null).rows.map((r) => r.key)).toEqual(['v1', 'v2']);
+    expect(gtinTableModel(record, null, APP, []).rows.map((r) => r.key)).toEqual(['v1', 'v2']);
+  });
+});
+
+describe('gtinProblem', () => {
+  const row = (gtin: string): GtinRow => ({ key: 'v1', label: 'S', gtin, mpn: '', mpnPlaceholder: '' });
+
+  it('gives a short reason for the cell', () => {
+    expect(gtinProblem(row('123'))).toBe('Needs 8, 12, 13 or 14 digits');
+    expect(gtinProblem(row('4006-381333931'))).toBe('Digits only');
+    expect(gtinProblem(row('4006381333932'))).toBe('Wrong check digit');
+    expect(gtinProblem({ key: 'product', label: 'This product', gtin: '4006381333932', mpn: null })).toBe('Wrong check digit');
+  });
+
+  it('is null for a valid or empty cell', () => {
+    expect(gtinProblem(row('4006381333931'))).toBeNull();
+    expect(gtinProblem(row(' 4006381333931 '))).toBeNull();
+    expect(gtinProblem(row(''))).toBeNull();
+    expect(gtinProblem(row('   '))).toBeNull();
   });
 });
 
@@ -232,5 +212,11 @@ describe('tableValidity', () => {
     const two = gtinTableModel({ variants: VARIANTS }, { v1: { gtin: '123' }, v2: { gtin: '4006381333932' } }, APP);
     expect(tableValidity(two)).toBe('2 barcodes above are not valid GTINs.');
     expect(tableValidity(gtinTableModel({ variants: VARIANTS }, { v2: { gtin: '4006381333931' } }, APP))).toBeNull();
+    expect(tableValidity(gtinTableModel({}, { product: { gtin: '123' } }, APP))).toBe('A barcode above is not a valid GTIN.');
+  });
+
+  it('checks only the cells the table shows', () => {
+    const value = { v3: { gtin: '123' }, product: { gtin: '123' } };
+    expect(tableValidity(gtinTableModel({ variants: VARIANTS }, value, APP))).toBeNull();
   });
 });

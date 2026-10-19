@@ -1,6 +1,5 @@
 import type { Market } from '../connection/markets';
 import { productInputId, type InputKey, type ProductAttributes, type ProductInput } from '../google/merchant';
-import { hasNoIdentifiers } from './identifiers';
 import { money, unitPrices } from './price';
 import { stripHtml, truncate } from './text';
 import type { GoogleFields, SwellImage, SwellProduct, SwellVariant } from './types';
@@ -82,13 +81,12 @@ function buildInput(
   if (!images.length) return 'no_image';
 
   const name = product.name?.trim() || product.id;
-  const own = variant ? fields.identifiers?.[variant.id] : undefined;
-  const shared = fields.identifiers?.product;
-  const gtin = (variant ? own?.gtin : shared?.gtin)?.trim();
-  // The legacy top-level MPN counts until the barcodes table first writes its shared row (null once cleared).
-  const legacyMpn = fields.identifiers && 'product' in fields.identifiers ? undefined : fields.mpn?.trim();
-  const mpn = own?.mpn?.trim() || shared?.mpn?.trim() || legacyMpn || undefined;
-  const noIdentifiers = hasNoIdentifiers(fields);
+  // The barcodes table: a GTIN per variant, or under `product` for a product without variants
+  const cells = fields.identifiers?.[variant?.id ?? 'product'];
+  const gtin = cells?.gtin?.trim();
+  // A variant's own MPN overrides the product's MPN
+  const mpn = (variant ? cells?.mpn?.trim() : undefined) || fields.mpn?.trim() || undefined;
+  const noIdentifiers = fields.no_identifiers === true;
   const tracked = Boolean(product.stock_tracking);
   const level = (variant ? variant.stock_level : product.stock_level) ?? 0;
 
