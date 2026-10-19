@@ -10,7 +10,8 @@ const CSS = `
 .gmc {
   --text: #1f2937; --muted: #5f6672; --border: #d1d5db;
   --surface: #ffffff; --field: #ffffff; --subtle: #f3f4f6;
-  --accent: #2563eb; --accent-text: #ffffff;
+  --accent: #2563eb; --accent-text: #ffffff; --focus: #4262ff;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --ok: #047857; --ok-bg: #ecfdf5;
   --bad: #b91c1c; --bad-bg: #fef2f2;
   --info: #1d4ed8; --info-bg: #eff6ff;
@@ -22,7 +23,8 @@ const CSS = `
   .gmc {
     --text: #e5e7eb; --muted: #9ca3af; --border: #3f3f46;
     --surface: #1c1c1f; --field: #141416; --subtle: #26262b;
-    --accent: #60a5fa; --accent-text: #0b1220;
+    --accent: #60a5fa; --accent-text: #0b1220; --focus: #a6b5ff;
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     --ok: #34d399; --ok-bg: rgba(52, 211, 153, .12);
     --bad: #f87171; --bad-bg: rgba(248, 113, 113, .12);
     --info: #93c5fd; --info-bg: rgba(147, 197, 253, .12);
@@ -31,8 +33,11 @@ const CSS = `
 .gmc *, .gmc *::before, .gmc *::after { box-sizing: border-box; }
 .gmc-root { container-type: inline-size; display: flex; flex-direction: column; gap: 16px; }
 .gmc a { color: var(--accent); }
-.gmc button:focus-visible, .gmc input:focus-visible, .gmc select:focus-visible, .gmc textarea:focus-visible,
+.gmc button:focus-visible, .gmc input[type="checkbox"]:focus-visible, .gmc input[type="radio"]:focus-visible,
 .gmc summary:focus-visible, .gmc .gmc-drop:focus-within, .gmc a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Fields show focus as the admin's own fields do: by the border colour, with no ring */
+.gmc input:focus, .gmc select:focus, .gmc textarea:focus { outline: none; }
+.gmc .gmc-input:focus { border-color: var(--focus); }
 .gmc-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .gmc-row { display: flex; gap: 12px; align-items: flex-start; }
 .gmc-row > .gmc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -65,6 +70,7 @@ const CSS = `
 .gmc-input { font: inherit; width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--field); }
 .gmc-input::placeholder { color: var(--muted); }
 .gmc-input[readonly] { background: var(--subtle); }
+.gmc select.gmc-input { appearance: none; -webkit-appearance: none; padding-right: 36px; background-image: var(--chevron); background-repeat: no-repeat; background-position: right 12px center; }
 .gmc-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .gmc-grid .full { grid-column: 1 / -1; }
 @container (min-width: 560px) { .gmc-grid { grid-template-columns: 1fr 1fr; } }

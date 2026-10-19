@@ -27,7 +27,7 @@ const CSS = `
 .gmc-gtin .gmc-gtin-variant { padding-top: 16px; overflow-wrap: anywhere; }
 .gmc-gtin-caption { font-weight: 600; color: var(--muted); }
 .gmc-gtin-field { display: flex; flex-direction: column; gap: 4px; }
-.gmc-input.bad { border-color: var(--bad); }
+.gmc .gmc-input.bad, .gmc .gmc-input.bad:focus { border-color: var(--bad); }
 .gmc-gtin-reason { color: var(--bad); font-size: 12px; }
 `;
 

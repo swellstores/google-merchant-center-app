@@ -44,25 +44,26 @@ function MarketCard({ cards }: { cards: PreviewCard[] }) {
   const [failedUrls, setFailedUrls] = useState<ReadonlySet<string>>(new Set());
   const card = pickedCard(cards, picked);
   const failed = imageState(card.image, failedUrls) === 'failed';
+  // No outer card: it sits beside the status in a row; only the product itself is boxed, as in Google
   return (
-    <Card>
-      <Stack gap={12}>
-        <div class="gmc-actions">
-          <strong>{card.heading}</strong>
-          {cards.length > 1 && (
-            <select class="gmc-input" style={{ width: 'auto' }} aria-label={`Variant for ${card.heading}`} value={card.offerId} onChange={(e) => setPicked((e.currentTarget as HTMLSelectElement).value)}>
-              {cards.map((c) => (
-                <option key={c.offerId} value={c.offerId}>
-                  {c.variant ?? c.title}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
+    <Stack gap={12}>
+      <div class="gmc-actions">
+        <strong>{card.heading}</strong>
+        {cards.length > 1 && (
+          <select class="gmc-input" style={{ width: 'auto' }} aria-label={`Variant for ${card.heading}`} value={card.offerId} onChange={(e) => setPicked((e.currentTarget as HTMLSelectElement).value)}>
+            {cards.map((c) => (
+              <option key={c.offerId} value={c.offerId}>
+                {c.variant ?? c.title}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      <Card>
         <Offer card={card} failed={failed} onImageError={(url) => setFailedUrls((previous) => new Set(previous).add(url))} />
-        {failed && <Notice tone="bad">This image did not load. Google cannot use it either: upload it again or choose another image.</Notice>}
-      </Stack>
-    </Card>
+      </Card>
+      {failed && <Notice tone="bad">This image did not load. Google cannot use it either: upload it again or choose another image.</Notice>}
+    </Stack>
   );
 }
 
