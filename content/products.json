@@ -4,24 +4,44 @@
   "label": "Products",
   "description": "A Google tab on the product page",
   "fields": [
-    { "id": "excluded", "label": "Hide from Google", "type": "toggle", "description": "Keep this product out of Google Shopping and free listings" },
-    { "id": "brand", "label": "Brand", "type": "text" },
-    { "id": "mpn", "label": "MPN", "type": "text", "description": "Manufacturer part number" },
+    {
+      "id": "excluded",
+      "label": "List this product in Google",
+      "type": "component",
+      "component": "GoogleListingSwitch",
+      "hint": "Turn off to keep this product out of Google Shopping and free listings. Products already in Google are removed within minutes."
+    },
+    {
+      "id": "brand",
+      "label": "Brand",
+      "type": "component",
+      "component": "BrandInput",
+      "hint": "The brand of the product. Google requires it for most products; without it the product may be shown less or disapproved."
+    },
     {
       "id": "condition",
       "label": "Condition",
       "type": "select",
+      "placeholder": "New",
+      "hint": "Whether the product is new, used or refurbished. Empty means new.",
       "options": [
         { "value": "new", "label": "New" },
         { "value": "used", "label": "Used" },
         { "value": "refurbished", "label": "Refurbished" }
       ]
     },
-    { "id": "google_category", "label": "Google product category", "type": "text", "description": "Category id or path from Google's product taxonomy" },
+    {
+      "id": "google_category",
+      "label": "Google product category",
+      "type": "component",
+      "component": "GoogleCategoryField",
+      "hint": "Optional. Google picks a category itself from the title and description; set it only to correct Google. Paste the category number or its full path from Google's list."
+    },
     {
       "id": "age_group",
       "label": "Age group",
       "type": "select",
+      "hint": "Only for clothing and accessories: the age group the product is for. Google requires it for them.",
       "options": [
         { "value": "newborn", "label": "Newborn" },
         { "value": "infant", "label": "Infant" },
@@ -34,13 +54,27 @@
       "id": "gender",
       "label": "Gender",
       "type": "select",
+      "hint": "Only for clothing and accessories: who the product is for. Google requires it for them.",
       "options": [
         { "value": "male", "label": "Male" },
         { "value": "female", "label": "Female" },
         { "value": "unisex", "label": "Unisex" }
       ]
     },
-    { "id": "identifier_exists", "label": "Has a GTIN or MPN", "type": "toggle", "default": true },
+    {
+      "id": "identifier_exists",
+      "label": "Has a barcode (GTIN) or part number (MPN)",
+      "type": "toggle",
+      "default": true,
+      "hint": "Turn off for handmade, custom or vintage products that have no barcode and no manufacturer part number. Otherwise Google expects a GTIN or an MPN with the brand."
+    },
+    {
+      "id": "identifiers",
+      "label": "Barcodes and part numbers",
+      "type": "component",
+      "component": "GtinTable",
+      "hint": "GTIN is the barcode number (UPC, EAN, ISBN). MPN is the manufacturer's part number. Give them per variant when the variants have their own."
+    },
     { "id": "status_label", "label": "Google", "type": "short_text", "readonly": true },
     { "id": "date_status", "label": "Status checked", "type": "datetime", "readonly": true }
   ],
@@ -53,13 +87,39 @@
           "id": "google",
           "label": "Google",
           "fields": [
-            { "id": "status_panel", "type": "component", "component": "GoogleStatus", "label": "Google status" },
-            { "id": "preview", "type": "component", "component": "ShoppingPreview", "label": "Shopping preview" },
             { "id": "excluded" },
-            { "type": "field_row", "fields": [{ "id": "brand" }, { "id": "mpn" }] },
-            { "type": "field_row", "fields": [{ "id": "condition" }, { "id": "identifier_exists" }] },
-            { "id": "google_category" },
-            { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] }
+            {
+              "type": "field_group",
+              "label": "Product details for Google",
+              "fields": [
+                { "type": "field_row", "fields": [{ "id": "brand", "admin_span": 2 }, { "id": "condition", "admin_span": 2 }] },
+                { "id": "google_category" },
+                { "id": "identifier_exists" },
+                { "id": "identifiers" },
+                { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] }
+              ]
+            },
+            {
+              "type": "field_row",
+              "fields": [
+                {
+                  "id": "status_panel",
+                  "type": "component",
+                  "component": "GoogleStatus",
+                  "label": "Google status",
+                  "admin_span": 2,
+                  "hint": "What Google says about this product right now."
+                },
+                {
+                  "id": "preview",
+                  "type": "component",
+                  "component": "ShoppingPreview",
+                  "label": "Shopping preview",
+                  "admin_span": 2,
+                  "hint": "How the product can look in Google Shopping, from the unsaved form."
+                }
+              ]
+            }
           ]
         }
       ]
