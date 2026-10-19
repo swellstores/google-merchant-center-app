@@ -13,8 +13,8 @@
     {
       "id": "brand",
       "label": "Brand",
-      "type": "component",
-      "component": "BrandInput",
+      "type": "text",
+      "max": 70,
       "hint": "The brand of the product. Google requires it for most products; without it the product may be shown less or disapproved."
     },
     {
@@ -32,9 +32,9 @@
     {
       "id": "google_category",
       "label": "Google product category",
-      "type": "component",
-      "component": "GoogleCategoryField",
-      "hint": "Optional. Google picks a category itself from the title and description; set it only to correct Google. Paste the category number or its full path from Google's list."
+      "type": "text",
+      "placeholder": "e.g. 1604 or Apparel & Accessories > Clothing > Shirts & Tops",
+      "hint": "Optional. Google picks a category itself from the title and description; set it only to correct Google. Paste a category number or full path from the Google product taxonomy (search the web for \"Google product taxonomy\")."
     },
     {
       "id": "age_group",

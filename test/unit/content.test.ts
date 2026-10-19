@@ -29,7 +29,7 @@ const hints: Record<string, string> = {
     'The brand of the product. Google requires it for most products; without it the product may be shown less or disapproved.',
   condition: 'Whether the product is new, used or refurbished. Empty means new.',
   google_category:
-    "Optional. Google picks a category itself from the title and description; set it only to correct Google. Paste the category number or its full path from Google's list.",
+    'Optional. Google picks a category itself from the title and description; set it only to correct Google. Paste a category number or full path from the Google product taxonomy (search the web for "Google product taxonomy").',
   no_identifiers:
     'Turn on for handmade, custom or vintage products that have no barcode and no manufacturer part number. Otherwise Google expects a GTIN or an MPN with the brand.',
   identifiers:
@@ -67,12 +67,10 @@ describe('products content, Google tab', () => {
     }
   });
 
+  // Components only where a plain field cannot do the job
   it('binds the components', () => {
-    expect(byId('brand')).toMatchObject({ type: 'component', component: 'BrandInput' });
-    expect(byId('google_category')).toMatchObject({
-      type: 'component',
-      component: 'GoogleCategoryField',
-    });
+    const components = tabFields.filter((f) => resolve(f).type === 'component').map((f) => f.id);
+    expect(components).toEqual(['identifiers', 'status_panel', 'preview']);
     expect(byId('identifiers')).toMatchObject({
       type: 'component',
       component: 'GtinTable',
@@ -86,6 +84,12 @@ describe('products content, Google tab', () => {
     expect(byId('excluded')).toMatchObject({ type: 'toggle', label: 'Hide from Google' });
     expect(byId('no_identifiers')).toMatchObject({ type: 'toggle', label: 'No barcode (GTIN) or part number (MPN)' });
     expect(byId('condition')).toMatchObject({ type: 'select', placeholder: 'New' });
+    // Google allows a brand of at most 70 characters
+    expect(byId('brand')).toMatchObject({ type: 'text', max: 70 });
+    expect(byId('google_category')).toMatchObject({
+      type: 'text',
+      placeholder: 'e.g. 1604 or Apparel & Accessories > Clothing > Shirts & Tops',
+    });
   });
 
   // The admin fills a default into an existing product that lacks the value and marks the form changed

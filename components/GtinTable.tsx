@@ -1,7 +1,7 @@
 import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { APP_ID, callRoute } from './lib/api';
-import { latestWins } from './lib/brand-input';
+import { latestWins } from './lib/latest-wins';
 import {
   editRow,
   gtinProblem,
