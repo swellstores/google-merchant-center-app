@@ -13,6 +13,8 @@ const SCROLL = `
 .gmc-gtin td { padding: 4px 8px 4px 0; vertical-align: middle; }
 .gmc-gtin td:first-child { min-width: 120px; }
 .gmc-input.bad { border-color: var(--bad); }
+.gmc-gtin.off { opacity: .55; }
+.gmc-gtin.off .gmc-input { cursor: not-allowed; }
 `;
 
 export default function GtinTable(props: ComponentProps) {
@@ -26,11 +28,13 @@ export default function GtinTable(props: ComponentProps) {
     props.setValidity(validity);
   }, [validity]);
 
+  useEffect(() => () => props.setValidity(null), []);
+
   function change(key: string, cell: 'gtin' | 'mpn', text: string) {
     props.setValue(setCell(value, key, cell, text));
   }
 
-  const problems = model.disabled ? [] : model.rows.map(gtinProblem).filter((p): p is string => Boolean(p));
+  const problems = model.disabled ? [] : model.rows.map((row) => ({ key: row.key, text: gtinProblem(row) })).filter((p) => p.text);
   const scrolls = model.rows.length > 20;
 
   return (
@@ -39,7 +43,7 @@ export default function GtinTable(props: ComponentProps) {
       <Stack gap={8}>
         {model.note && <span class="gmc-muted">{model.note}</span>}
         <div class={scrolls ? 'gmc-gtin-scroll' : undefined}>
-          <table class="gmc-gtin">
+          <table class={model.disabled ? 'gmc-gtin off' : 'gmc-gtin'}>
             <thead>
               <tr>
                 <th scope="col">Variant</th>
@@ -54,7 +58,9 @@ export default function GtinTable(props: ComponentProps) {
                   <tr key={row.key}>
                     <td>{row.label}</td>
                     <td>
-                      {row.gtin !== null && (
+                      {row.gtin === null ? (
+                        <span class="gmc-muted">Per variant</span>
+                      ) : (
                         <input
                           class={bad ? 'gmc-input bad' : 'gmc-input'}
                           inputMode="numeric"
@@ -85,7 +91,7 @@ export default function GtinTable(props: ComponentProps) {
         {problems.length > 0 && (
           <Notice tone="bad">
             {problems.map((p) => (
-              <div key={p}>{p}</div>
+              <div key={p.key}>{p.text}</div>
             ))}
           </Notice>
         )}

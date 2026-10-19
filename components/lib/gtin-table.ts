@@ -54,7 +54,7 @@ export function gtinTableModel(record: { variants?: unknown; $app?: Record<strin
 export function setCell(value: Identifiers | null, key: string, cell: 'gtin' | 'mpn', text: string): Identifiers {
   const { [key]: entry, ...rest } = value ?? {};
   const { [cell]: _dropped, ...kept } = entry ?? {};
-  const next = text.trim() ? { ...kept, [cell]: text } : kept;
+  const next = text.trim() ? { ...kept, [cell]: text.trim() } : kept;
   return Object.keys(next).length ? { ...rest, [key]: next } : rest;
 }
 

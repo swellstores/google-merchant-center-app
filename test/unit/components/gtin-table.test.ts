@@ -61,6 +61,10 @@ describe('setCell', () => {
     expect(next).toEqual({ gone: { gtin: '1', mpn: 'X' }, v1: { mpn: 'A', gtin: '4006381333931' } });
   });
 
+  it('setCell stores trimmed text', () => {
+    expect(setCell(null, 'v1', 'mpn', '  AB-1 ')).toEqual({ v1: { mpn: 'AB-1' } });
+  });
+
   it('an emptied cell is removed, not stored empty', () => {
     expect(setCell({ v1: { gtin: '4006381333931', mpn: 'A' } }, 'v1', 'gtin', '  ')).toEqual({ v1: { mpn: 'A' } });
     expect(setCell({ v1: { mpn: 'A' } }, 'v1', 'mpn', '')).toEqual({});
