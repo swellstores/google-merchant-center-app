@@ -4,6 +4,7 @@ import { MAX_BATCH_PARTS, sendBatch, type BatchPart, type BatchResult } from '..
 import { classifyGoogleError, errorMessage, GoogleApiError } from '../google/http';
 import { deleteProductInput, insertProductInput, patchProductInput, type ProductAttributes } from '../google/merchant';
 import { buildOffers, marketOfInput, parseInputId, type OfferDefaults, type SkipReason } from '../mapping/offers';
+import { needsAttributes } from '../mapping/attributes';
 import type { GoogleFields, SwellProduct } from '../mapping/types';
 import { listOf, type BatchOp, type Outbox } from '../swell-batch';
 import { pendingStatus, refusedStatus, skippedStatus, statusFields, type ProductStatus } from '../status/product-status';
@@ -286,7 +287,11 @@ export async function deliver(env: DeliveryEnv, units: WorkUnit[], read?: Map<st
     if (plan.product && settled.fields) {
       // `$set` inside the app's object replaces the list; any other form merges it by position.
       const { input_ids, ...fields } = settled.fields;
-      const status = settled.status ? statusFields(settled.status, env.ctx.now(), (plan.product.$app?.[env.ctx.appId] as GoogleFields | undefined)?.attribute_options) : {};
+      const stored = plan.product.$app?.[env.ctx.appId];
+      // Without a new status the marker still follows the merchant's choices and the stored issues.
+      const status = settled.status
+        ? statusFields(settled.status, env.ctx.now(), stored?.attribute_options)
+        : { needs_attributes: needsAttributes(stored?.status_issues ?? [], stored?.attribute_options) };
       const { $set: statusSet, ...statusPlain } = status as { $set?: Record<string, unknown> };
       const app = { ...fields, ...statusPlain, $set: { input_ids, ...statusSet } };
       env.outbox.add({ method: 'put', url: `/products/${plan.product.id}`, data: { $app: { [env.ctx.appId]: app } } });

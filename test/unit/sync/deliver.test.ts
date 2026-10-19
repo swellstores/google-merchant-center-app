@@ -140,6 +140,20 @@ describe('deliver', () => {
     expect(Object.keys((puts[0].data as any).$app)).toEqual([APP_ID]);
   });
 
+  it('a stored choice makes the written marker true', async () => {
+    const stored = { status: 'approved', status_label: 'Approved', status_hash: 'x', status_issues: [], attribute_options: { color: 'o1' } };
+    const { env, appFields } = setup([mug({ $app: { [APP_ID]: stored } })]);
+    await deliver(env, [unit('p1')]);
+    expect(appFields('p1')).toMatchObject({ needs_attributes: true });
+  });
+
+  it('clearing a choice turns the marker off on the next send', async () => {
+    const stored = { status: 'approved', status_label: 'Approved', status_hash: 'x', status_issues: [], attribute_options: { color: null }, needs_attributes: true };
+    const { env, appFields } = setup([mug({ $app: { [APP_ID]: stored } })]);
+    await deliver(env, [unit('p1')]);
+    expect(appFields('p1')).toMatchObject({ needs_attributes: false });
+  });
+
   it('deletes the inputs of a deleted product without writing to it', async () => {
     const { google, env } = setup([]);
     google.inputs.set(`${DS}|en~US~v1`, {});

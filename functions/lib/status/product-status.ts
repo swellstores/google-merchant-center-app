@@ -91,14 +91,14 @@ function severityOf(google: string | undefined, resolution: string | undefined):
   return 'info';
 }
 
-const keyOf = (issue: StatusIssue) => `${issue.code}|${issue.attribute ?? ''}`;
+const keyOf = (issue: Pick<StatusIssue, 'code' | 'attribute'>) => `${issue.code}|${issue.attribute ?? ''}`;
 const byCode = (a: StatusIssue, b: StatusIssue) => (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : 0);
 
 /** `missing: false` leaves out the issue of offers Google does not hold, for a product just sent. */
 export function groupIssues(answers: OfferAnswer[], missing = true): StatusIssue[] {
   const groups = new Map<string, StatusIssue>();
   const add = (code: string, severity: StatusIssue['severity'], inputId: string, countries: string[], from: Partial<StatusIssue>) => {
-    const key = `${code}|${from.attribute ?? ''}`;
+    const key = keyOf({ code, attribute: from.attribute });
     let issue = groups.get(key);
     if (!issue) {
       issue = { code, severity, description: from.description ?? code, offers: [], countries: [] };

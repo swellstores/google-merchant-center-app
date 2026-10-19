@@ -1,6 +1,7 @@
 import { MAX_BATCH_PARTS, sendBatch, type BatchResult } from '../google/batch';
 import { classifyGoogleError, errorMessage, GoogleApiError } from '../google/http';
 import { getProduct } from '../google/merchant';
+import { needsAttributes } from '../mapping/attributes';
 import type { GoogleFields, SwellProduct } from '../mapping/types';
 import { listOf, SWELL_WAVE, type BatchOp } from '../swell-batch';
 import type { DeliveryEnv } from '../sync/deliver';
@@ -257,7 +258,8 @@ export async function statusRefreshPass(
       const status = fields.sync_state === 'error' && fields.sync_error ? partlyRefused(inGoogle, fields.sync_error) : inGoogle;
       const resend = resendDue(offers, fields, now);
       const ops: BatchOp[] = [];
-      if (status.hash !== fields.status_hash) {
+      const marker = needsAttributes(status.issues, fields.attribute_options);
+      if (status.hash !== fields.status_hash || marker !== (fields.needs_attributes === true)) {
         ops.push({ method: 'put', url: `/products/${product.id}`, data: { $app: { [appId]: statusFields(status, now, fields.attribute_options) } } });
       }
       if (resend) ops.push(enqueueWrite(undefined, { productId: product.id, kind: 'full' }));

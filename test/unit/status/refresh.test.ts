@@ -109,6 +109,22 @@ describe('status refresh pass', () => {
     expect(pass.job).toMatchObject({ checked: 2, requeued: 0, counters: { approved: 2, pending: 0 } });
   });
 
+  it('a stored choice makes the written marker true', async () => {
+    const { env, swell } = setup([product(1, 1, { attribute_options: { size: 'o1' } })], { statuses: { [offerOf(1)]: approved() } });
+    await statusRefreshPass(env, newStatusRefreshJob(NOW));
+    expect(productPuts(swell)[0].data).toEqual({ $app: { [APP_ID]: statusFields(statusOf(1, approved()), NOW, { size: 'o1' }) } });
+    expect((productPuts(swell)[0].data as any).$app[APP_ID].needs_attributes).toBe(true);
+  });
+
+  it('a refresh corrects a stale marker without a status change', async () => {
+    const same = statusOf(1, approved());
+    const { env, swell } = setup([product(1, 1, { ...storedStatus(same), needs_attributes: true })], { statuses: { [offerOf(1)]: approved() } });
+    await statusRefreshPass(env, newStatusRefreshJob(NOW));
+    const puts = productPuts(swell);
+    expect(puts).toHaveLength(1);
+    expect((puts[0].data as any).$app[APP_ID].needs_attributes).toBe(false);
+  });
+
   it('one Google batch of at most 100 offers, the page cut at a product', async () => {
     const products = [product(1, 40), product(2, 40), product(3, 40)];
     const { env, google } = setup(products);

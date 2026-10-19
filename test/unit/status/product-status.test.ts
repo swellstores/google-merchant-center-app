@@ -185,7 +185,7 @@ describe('statusFields', () => {
     productStatus([disapproved('a', [{ code: 'missing_attribute', severity: 'DISAPPROVED', description: 'm', attribute }])]);
   const at = Date.parse('2026-10-16T10:00:00Z');
 
-  it('needs_attributes is true while Google names an option attribute', () => {
+  it('needs_attributes is true while Google names an attribute the tab can provide', () => {
     expect(statusFields(missing('size'), at).needs_attributes).toBe(true);
     expect(statusFields(missing('age group'), at).needs_attributes).toBe(true);
     expect(statusFields(missing('brand'), at).needs_attributes).toBe(false);
