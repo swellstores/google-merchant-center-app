@@ -77,7 +77,9 @@ function buildInput(
   const own = variant ? fields.identifiers?.[variant.id] : undefined;
   const shared = fields.identifiers?.product;
   const gtin = (variant ? own?.gtin : shared?.gtin)?.trim();
-  const mpn = own?.mpn?.trim() || shared?.mpn?.trim() || fields.mpn?.trim() || undefined;
+  // The legacy top-level MPN counts until the barcodes table first writes its shared row (null once cleared).
+  const legacyMpn = fields.identifiers && 'product' in fields.identifiers ? undefined : fields.mpn?.trim();
+  const mpn = own?.mpn?.trim() || shared?.mpn?.trim() || legacyMpn || undefined;
   const noIdentifiers = fields.identifier_exists === false;
   const tracked = Boolean(product.stock_tracking);
   const level = (variant ? variant.stock_level : product.stock_level) ?? 0;

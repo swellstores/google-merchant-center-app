@@ -1,7 +1,7 @@
 import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect } from 'preact/hooks';
 import { APP_ID } from './lib/api';
-import { gtinProblem, gtinTableModel, setCell, tableValidity, type Identifiers } from './lib/gtin-table';
+import { editRow, gtinProblem, gtinTableModel, tableValidity, type GtinRow, type Identifiers } from './lib/gtin-table';
 import { Notice, Root, Stack } from './lib/ui';
 
 export const config = { description: 'Barcodes and part numbers per variant' };
@@ -30,8 +30,8 @@ export default function GtinTable(props: ComponentProps) {
 
   useEffect(() => () => props.setValidity(null), []);
 
-  function change(key: string, cell: 'gtin' | 'mpn', text: string) {
-    props.setValue(setCell(value, key, cell, text));
+  function change(row: GtinRow, cell: 'gtin' | 'mpn', text: string) {
+    props.setValue(editRow(value, row, cell, text));
   }
 
   const problems = model.disabled ? [] : model.rows.map((row) => ({ key: row.key, text: gtinProblem(row) })).filter((p) => p.text);
@@ -68,7 +68,7 @@ export default function GtinTable(props: ComponentProps) {
                           aria-invalid={bad}
                           value={row.gtin}
                           disabled={locked}
-                          onInput={(e) => change(row.key, 'gtin', (e.currentTarget as HTMLInputElement).value)}
+                          onInput={(e) => change(row, 'gtin', (e.currentTarget as HTMLInputElement).value)}
                         />
                       )}
                     </td>
@@ -79,7 +79,7 @@ export default function GtinTable(props: ComponentProps) {
                         value={row.mpn}
                         placeholder={row.mpnPlaceholder}
                         disabled={locked}
-                        onInput={(e) => change(row.key, 'mpn', (e.currentTarget as HTMLInputElement).value)}
+                        onInput={(e) => change(row, 'mpn', (e.currentTarget as HTMLInputElement).value)}
                       />
                     </td>
                   </tr>

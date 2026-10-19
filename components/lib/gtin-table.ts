@@ -31,22 +31,23 @@ export function gtinTableModel(record: { variants?: unknown; $app?: Record<strin
   const disabled = fields.identifier_exists === false;
   const variants = liveVariants(record.variants);
   const shared = value?.[SHARED];
-  const sharedMpn = shared?.mpn ?? '';
+  // The legacy top-level MPN stands in for the shared one until the shared row is first written (or cleared to null).
+  const legacyApplies = !(value && SHARED in value);
   const legacyMpn: string = typeof fields.mpn === 'string' ? fields.mpn : '';
-  const common = sharedMpn || legacyMpn;
+  const sharedMpn = legacyApplies ? legacyMpn : (shared?.mpn ?? '');
 
   const rows: GtinRow[] = variants.length
     ? [
-        { key: SHARED, label: 'All variants', gtin: null, mpn: sharedMpn, mpnPlaceholder: legacyMpn },
+        { key: SHARED, label: 'All variants', gtin: null, mpn: sharedMpn, mpnPlaceholder: '' },
         ...variants.map((v) => ({
           key: v.id,
           label: v.name || v.id,
           gtin: value?.[v.id]?.gtin ?? '',
           mpn: value?.[v.id]?.mpn ?? '',
-          mpnPlaceholder: common,
+          mpnPlaceholder: sharedMpn,
         })),
       ]
-    : [{ key: SHARED, label: 'This product', gtin: shared?.gtin ?? '', mpn: sharedMpn, mpnPlaceholder: legacyMpn }];
+    : [{ key: SHARED, label: 'This product', gtin: shared?.gtin ?? '', mpn: sharedMpn, mpnPlaceholder: '' }];
 
   return { rows, disabled, note: disabled ? 'Not sent while the switch above is off' : null };
 }
@@ -61,6 +62,12 @@ const blank = (cell: string | null | undefined) => !cell?.trim();
 export function setCell(value: Identifiers | null, key: string, cell: 'gtin' | 'mpn', text: string): Identifiers {
   const entry = { ...value?.[key], [cell]: blank(text) ? null : text };
   return { ...value, [key]: blank(entry.gtin) && blank(entry.mpn) ? null : entry };
+}
+
+/** Typing into a row's cell. The shared row's first edit also writes the MPN it shows, which may be the legacy one. */
+export function editRow(value: Identifiers | null, row: GtinRow, cell: 'gtin' | 'mpn', text: string): Identifiers {
+  const base = row.key === SHARED && cell === 'gtin' ? setCell(value, SHARED, 'mpn', row.mpn) : value;
+  return setCell(base, row.key, cell, text);
 }
 
 const REASONS = {

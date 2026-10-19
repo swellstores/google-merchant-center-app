@@ -103,7 +103,7 @@ describe('buildOffers', () => {
           google_category: '1604',
           age_group: 'adult',
           gender: 'unisex',
-          identifiers: { v1: { gtin: '4006381333931', mpn: 'TS-RED-M' }, product: { gtin: '0012345678905' } },
+          identifiers: { v1: { gtin: '4006381333931', mpn: 'TS-RED-M' } },
         },
       },
     };
@@ -145,6 +145,23 @@ describe('buildOffers', () => {
     expect(red.input.productAttributes.gtins).toBeUndefined();
     expect(blue.input.productAttributes).toMatchObject({ mpn: 'TS-SHARED' });
     expect(blue.input.productAttributes.gtins).toBeUndefined();
+  });
+
+  it('the legacy MPN is still sent while the shared row was never written', () => {
+    for (const identifiers of [undefined, {}, { v1: { gtin: '4006381333931' } }]) {
+      const product: SwellProduct = { ...SHIRT, $app: { [APP]: { mpn: ' OLD ', identifiers } } };
+      expect(buildOffers(product, [MARKET], OPTS).offers.map((o) => o.input.productAttributes.mpn)).toEqual(['OLD', 'OLD']);
+    }
+    expect(buildOffers({ ...MUG, $app: { [APP]: { mpn: 'OLD' } } }, [MARKET], OPTS).offers[0].input.productAttributes.mpn).toBe('OLD');
+  });
+
+  it('clearing the shared MPN stops sending the legacy MPN', () => {
+    const shirt: SwellProduct = { ...SHIRT, $app: { [APP]: { mpn: 'OLD', identifiers: { product: null } } } };
+    expect(buildOffers(shirt, [MARKET], OPTS).offers.map((o) => o.input.productAttributes.mpn)).toEqual([undefined, undefined]);
+    const mug: SwellProduct = { ...MUG, $app: { [APP]: { mpn: 'OLD', identifiers: { product: null } } } };
+    expect(buildOffers(mug, [MARKET], OPTS).offers[0].input.productAttributes.mpn).toBeUndefined();
+    const own: SwellProduct = { ...SHIRT, $app: { [APP]: { mpn: 'OLD', identifiers: { product: null, v1: { mpn: 'RED' } } } } };
+    expect(buildOffers(own, [MARKET], OPTS).offers.map((o) => o.input.productAttributes.mpn)).toEqual(['RED', undefined]);
   });
 
   it('reads cleared (null) entries and cells as empty', () => {

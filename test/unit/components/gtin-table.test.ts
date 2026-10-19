@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gtinTableModel, setCell, tableValidity } from '../../../components/lib/gtin-table';
+import { editRow, gtinTableModel, setCell, tableValidity } from '../../../components/lib/gtin-table';
 import type { Market } from '../../../functions/lib/connection/markets';
 import { buildOffers } from '../../../functions/lib/mapping/offers';
 import type { SwellProduct } from '../../../functions/lib/mapping/types';
@@ -39,11 +39,35 @@ describe('gtinTableModel', () => {
     expect(model.rows[2]).toMatchObject({ mpn: 'SHIRT-M', mpnPlaceholder: 'SHIRT' });
   });
 
-  it('the legacy top-level MPN fills the All variants row', () => {
+  it('the legacy MPN shows as the shared value until the shared row is written', () => {
     const record = { variants: VARIANTS, $app: { [APP]: { mpn: 'LEGACY' } } };
-    const model = gtinTableModel(record, null, APP);
-    expect(model.rows[0]).toMatchObject({ mpn: '', mpnPlaceholder: 'LEGACY' });
-    expect(model.rows[1].mpnPlaceholder).toBe('LEGACY');
+    for (const value of [null, {}, { v1: { gtin: '4006381333931' } }]) {
+      const model = gtinTableModel(record, value, APP);
+      expect(model.rows[0]).toMatchObject({ key: 'product', mpn: 'LEGACY', mpnPlaceholder: '' });
+      expect(model.rows[1].mpnPlaceholder).toBe('LEGACY');
+    }
+    const written = gtinTableModel(record, { product: { mpn: 'NEW' } }, APP);
+    expect(written.rows[0].mpn).toBe('NEW');
+    expect(written.rows[1].mpnPlaceholder).toBe('NEW');
+    const cleared = gtinTableModel(record, setCell(null, 'product', 'mpn', ''), APP);
+    expect(cleared.rows[0].mpn).toBe('');
+    expect(cleared.rows[1].mpnPlaceholder).toBe('');
+
+    const single = { $app: { [APP]: { mpn: 'LEGACY' } } };
+    expect(gtinTableModel(single, null, APP).rows[0]).toMatchObject({ label: 'This product', mpn: 'LEGACY', mpnPlaceholder: '' });
+    expect(gtinTableModel(single, { product: null }, APP).rows[0].mpn).toBe('');
+  });
+
+  it('the first edit of This product keeps the legacy MPN it shows', () => {
+    const record = { $app: { [APP]: { mpn: 'LEGACY' } } };
+    const [row] = gtinTableModel(record, null, APP).rows;
+    const next = editRow(null, row, 'gtin', '4006381333931');
+    expect(next).toEqual({ product: { mpn: 'LEGACY', gtin: '4006381333931' } });
+    expect(gtinTableModel(record, next, APP).rows[0]).toMatchObject({ gtin: '4006381333931', mpn: 'LEGACY' });
+    expect(editRow(null, row, 'mpn', 'LEGACY-2')).toEqual({ product: { mpn: 'LEGACY-2' } });
+    expect(editRow(null, row, 'mpn', '')).toEqual({ product: null });
+    const [variantRow] = gtinTableModel({ variants: VARIANTS, $app: record.$app }, null, APP).rows.slice(1);
+    expect(editRow(null, variantRow, 'gtin', '4006381333931')).toEqual({ v1: { gtin: '4006381333931' } });
   });
 
   it('turning the switch off keeps the values and disables the table', () => {
