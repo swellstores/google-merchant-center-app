@@ -5,6 +5,11 @@ export interface Price {
   currencyCode: string;
 }
 
+export interface VariantOption {
+  name: string;
+  value: string;
+}
+
 export interface ProductAttributes {
   title: string;
   description?: string;
@@ -21,12 +26,14 @@ export interface ProductAttributes {
   identifierExists?: boolean;
   googleProductCategory?: string;
   itemGroupId?: string;
+  itemGroupTitle?: string;
   ageGroup?: string;
   gender?: string;
   color?: string;
   size?: string;
   material?: string;
   pattern?: string;
+  variantOptions?: VariantOption[];
 }
 
 export interface ProductInput {

@@ -279,6 +279,25 @@ describe('buildOffers attributes from options', () => {
     expect(offers[0].input.productAttributes).not.toHaveProperty('color');
     expect(offers[0].input.productAttributes).not.toHaveProperty('size');
   });
+
+  it('sends each variant its group title and every option as named in Swell, chosen or not', () => {
+    const { offers } = buildOffers({ ...product, $app: {} }, [MARKET], OPTS);
+    expect(offers.map((o) => [o.input.productAttributes.itemGroupTitle, o.input.productAttributes.variantOptions])).toEqual([
+      ['T-Shirt', [{ name: 'Hue', value: 'Red' }, { name: 'Fit', value: 'M' }]],
+      ['T-Shirt', [{ name: 'Hue', value: 'Blue' }, { name: 'Fit', value: 'M' }]],
+    ]);
+  });
+
+  it('cuts the group title to 150 characters', () => {
+    const [offer] = buildOffers({ ...product, name: 'x'.repeat(300) }, [MARKET], OPTS).offers;
+    expect(offer.input.productAttributes.itemGroupTitle).toHaveLength(150);
+  });
+
+  it('sends a product without variants neither', () => {
+    const [offer] = buildOffers({ ...MUG, options: product.options }, [MARKET], OPTS).offers;
+    expect(offer.input.productAttributes.itemGroupTitle).toBeUndefined();
+    expect(offer.input.productAttributes.variantOptions).toBeUndefined();
+  });
 });
 
 describe('input ids', () => {

@@ -1,6 +1,6 @@
 import type { Market } from '../connection/markets';
 import { productInputId, type InputKey, type ProductAttributes, type ProductInput } from '../google/merchant';
-import { variantAttributes } from './attributes';
+import { variantAttributes, variantOptions } from './attributes';
 import { money, unitPrices } from './price';
 import { stripHtml, truncate } from './text';
 import type { GoogleFields, SwellImage, SwellProduct, SwellVariant } from './types';
@@ -25,6 +25,7 @@ interface BuildOptions {
 }
 
 const MAX_TITLE = 150;
+const MAX_GROUP_TITLE = 150;
 const MAX_DESCRIPTION = 5000;
 const MAX_ADDITIONAL_IMAGES = 10;
 
@@ -113,9 +114,11 @@ function buildInput(
     identifierExists: noIdentifiers ? false : undefined,
     googleProductCategory: categoryOf(fields.google_category),
     itemGroupId: variant ? product.id : undefined,
+    itemGroupTitle: variant ? truncate(name, MAX_GROUP_TITLE) : undefined,
     ageGroup: fields.age_group ? fields.age_group.toUpperCase() : undefined,
     gender: fields.gender ? fields.gender.toUpperCase() : undefined,
     ...variantAttributes(product, variant, fields.attribute_options),
+    variantOptions: variantOptions(product, variant),
   };
 
   return {

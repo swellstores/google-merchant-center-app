@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { googleAttribute, neededAttributes, needsAttributes, variantAttributes } from '../../../functions/lib/mapping/attributes';
-import type { SwellProduct, SwellVariant } from '../../../functions/lib/mapping/types';
+import { googleAttribute, neededAttributes, needsAttributes, variantAttributes, variantOptions } from '../../../functions/lib/mapping/attributes';
+import type { SwellOption, SwellProduct, SwellVariant } from '../../../functions/lib/mapping/types';
 import type { StatusIssue } from '../../../functions/lib/status/product-status';
 
 const issue = (attribute?: string): StatusIssue => ({ code: 'c', severity: 'disapproved', description: 'd', offers: [], countries: [], attribute });
@@ -106,5 +106,64 @@ describe('variantAttributes', () => {
   it('options named Color are ignored until chosen', () => {
     expect(variantAttributes(product, variant('e'), {})).toEqual({});
     expect(variantAttributes(product, variant('e'), { size: 'o3' })).toEqual({ size: 'Red' });
+  });
+});
+
+describe('variantOptions', () => {
+  const variant = (...ids: string[]): SwellVariant => ({ id: 'v', option_value_ids: ids });
+  const option = (id: string, name: string, value: string, extra: Partial<SwellOption> = {}): SwellOption => ({
+    id,
+    name,
+    variant: true,
+    values: [{ id: `${id}-v`, name: value }],
+    ...extra,
+  });
+  const productOf = (...options: SwellOption[]): SwellProduct => ({ id: 'p', options });
+  const valuesOf = (product: SwellProduct) => variant(...product.options!.map((o) => `${o.id}-v`));
+
+  it('copies each variant option name and the variant’s value, trimmed, in product order', () => {
+    const product = productOf(option('o1', ' Size ', '  M '), option('o2', 'Shade', 'Teal'));
+    expect(variantOptions(product, valuesOf(product))).toEqual([
+      { name: 'Size', value: 'M' },
+      { name: 'Shade', value: 'Teal' },
+    ]);
+  });
+
+  it('skips an option that makes no variants', () => {
+    const product = productOf(option('o1', 'Size', 'M'), option('o2', 'Gift note', 'Yes', { variant: false }));
+    expect(variantOptions(product, valuesOf(product))).toEqual([{ name: 'Size', value: 'M' }]);
+  });
+
+  it('skips a blank name or value, and an option the variant has no value for', () => {
+    const product = productOf(option('o1', 'Size', '   '), option('o2', '  ', 'Teal'), option('o3', 'Fit', 'Slim'), option('o4', 'Shade', 'Rust'));
+    expect(variantOptions(product, variant('o1-v', 'o2-v', 'o3-v'))).toEqual([{ name: 'Fit', value: 'Slim' }]);
+  });
+
+  it('sends at most 30 options', () => {
+    const product = productOf(...Array.from({ length: 31 }, (_, i) => option(`o${i}`, `Name ${i}`, `Value ${i}`)));
+    const sent = variantOptions(product, valuesOf(product))!;
+    expect(sent).toHaveLength(30);
+    expect(sent.at(-1)).toEqual({ name: 'Name 29', value: 'Value 29' });
+  });
+
+  it('cuts a name or value to 250 characters', () => {
+    const product = productOf(option('o1', 'n'.repeat(300), 'v'.repeat(300)));
+    const [sent] = variantOptions(product, valuesOf(product))!;
+    expect(sent.name).toHaveLength(250);
+    expect(sent.value).toHaveLength(250);
+  });
+
+  it('stops before the names and values pass 5000 characters in all', () => {
+    const product = productOf(...Array.from({ length: 25 }, (_, i) => option(`o${i}`, `${i}`.padEnd(100, 'n'), 'v'.repeat(150))));
+    const sent = variantOptions(product, valuesOf(product))!;
+    expect(sent).toHaveLength(20);
+    expect(sent.reduce((total, o) => total + o.name.length + o.value.length, 0)).toBe(5000);
+  });
+
+  it('is undefined without a variant or an option to send', () => {
+    const product = productOf(option('o1', 'Size', 'M'));
+    expect(variantOptions(product, undefined)).toBeUndefined();
+    expect(variantOptions(product, variant())).toBeUndefined();
+    expect(variantOptions({ id: 'p' }, variant('o1-v'))).toBeUndefined();
   });
 });
