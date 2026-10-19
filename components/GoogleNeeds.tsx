@@ -33,7 +33,7 @@ function NeedField(props: { row: NeedRow; readonly: boolean; onChoose: (optionId
             onChange={(e) => props.onChoose((e.currentTarget as HTMLSelectElement).value || null)}
           >
             <option value="">Not sent</option>
-            {row.missing && row.chosen && <option value={row.chosen}>{row.chosen}</option>}
+            {row.missing && row.chosen && <option value={row.chosen}>Removed option</option>}
             {row.options.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.name}

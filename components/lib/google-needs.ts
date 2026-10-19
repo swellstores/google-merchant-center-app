@@ -41,7 +41,7 @@ export function needRows(record: unknown, value: AttributeOptions | null, appId:
     if (!needed.has(attribute) && chosen === null) continue;
     const label = LABELS[attribute];
     const base = { attribute, label, chosen, missing: chosen !== null && !variantOptions.some((o) => o.id === chosen) };
-    if (attribute in FIELD_ATTRIBUTES) rows.push({ ...base, kind: 'field', options: [] });
+    if (attribute in FIELD_ATTRIBUTES) rows.push({ ...base, kind: 'field', options: [], missing: false });
     else if (!variantOptions.length && chosen === null) rows.push({ ...base, kind: 'create', options: [] });
     else rows.push({ ...base, kind: 'option', options: variantOptions });
   }

@@ -44,6 +44,11 @@ describe('needRows', () => {
     ]);
   });
 
+  it('never marks a field row missing', () => {
+    const rows = needRows(record(['gender'], OPTIONS), { gender: 'o9' } as any, APP);
+    expect(rows[0]).toMatchObject({ kind: 'field', missing: false });
+  });
+
   it('asks to create an option when the product has no variant option', () => {
     expect(needRows(record(['size'], [OPTIONS[1]]), null, APP)[0]).toMatchObject({ kind: 'create', options: [], chosen: null });
     expect(needRows(record(['size']), null, APP)[0]).toMatchObject({ kind: 'create' });
