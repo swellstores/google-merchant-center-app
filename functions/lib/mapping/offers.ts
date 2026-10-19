@@ -61,6 +61,13 @@ function buildLink(template: string, values: Record<string, string>): string {
   return template.replace(/\{(slug|product_id|variant_id|locale|currency)\}/g, (_, name: string) => encodeURIComponent(values[name] ?? ''));
 }
 
+/** A line pasted from Google's list with ids, `1604 - Apparel & Accessories > Clothing`, sends just the id. */
+function categoryOf(text: string | undefined): string | undefined {
+  const category = text?.trim();
+  if (!category) return undefined;
+  return category.match(/^\s*(\d+)\s+-\s/)?.[1] ?? category;
+}
+
 function buildInput(
   product: SwellProduct,
   variant: SwellVariant | undefined,
@@ -104,7 +111,7 @@ function buildInput(
     mpn: noIdentifiers ? undefined : mpn,
     gtins: gtin && !noIdentifiers ? [gtin] : undefined,
     identifierExists: noIdentifiers ? false : undefined,
-    googleProductCategory: fields.google_category?.trim() || undefined,
+    googleProductCategory: categoryOf(fields.google_category),
     itemGroupId: variant ? product.id : undefined,
     ageGroup: fields.age_group ? fields.age_group.toUpperCase() : undefined,
     gender: fields.gender ? fields.gender.toUpperCase() : undefined,

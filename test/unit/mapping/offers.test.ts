@@ -211,6 +211,16 @@ describe('buildOffers', () => {
     expect(attributes.mpn).toBeUndefined();
   });
 
+  it('sends only the number of a line pasted from Google’s list with ids', () => {
+    const sent = (google_category: string) =>
+      buildOffers({ ...MUG, $app: { [APP]: { google_category } } }, [MARKET], OPTS).offers[0].input.productAttributes.googleProductCategory;
+    expect(sent('1604 - Apparel & Accessories > Clothing')).toBe('1604');
+    expect(sent(' 212 - Apparel & Accessories > Clothing > Shirts & Tops ')).toBe('212');
+    expect(sent('1604')).toBe('1604');
+    expect(sent('Apparel & Accessories > Clothing > Shirts & Tops')).toBe('Apparel & Accessories > Clothing > Shirts & Tops');
+    expect(sent('Hardware > Tools > Multi-Tools')).toBe('Hardware > Tools > Multi-Tools');
+  });
+
   it('uses the default brand and condition', () => {
     const [offer] = buildOffers(MUG, [MARKET], { ...OPTS, defaults: { brand: 'Test store', condition: 'used' } }).offers;
     expect(offer.input.productAttributes).toMatchObject({ brand: 'Test store', condition: 'USED' });
