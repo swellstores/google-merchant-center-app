@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.swell.store/notification.json",
+  "collection": "connections",
+  "label": "Google Merchant Center disconnected",
+  "description": "Emails the store admins once each time the Google Merchant Center connection breaks and product syncing stops.",
+  "method": "email",
+  "event": "updated",
+  "admin": true,
+  "repeat": true,
+  "conditions": {
+    "$record.status": "broken",
+    "$origData.status": { "$ne": "broken" }
+  },
+  "subject": "Google Merchant Center is disconnected",
+  "sample": {
+    "status": "broken",
+    "last_error": "Google rejected the service-account key (401 invalid_grant).",
+    "merchant_id": "123456789"
+  }
+}
