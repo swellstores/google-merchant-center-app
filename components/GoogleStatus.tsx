@@ -1,6 +1,7 @@
 import type { ComponentProps } from '@swell/apps-sdk/components';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { callRoute } from './lib/api';
+import { issueKey } from './lib/dashboard';
 import { issueSeverity, statusPanelModel, type OfferIssue, type ProductStatusView, type StatusIssue } from './lib/status-view';
 import { Button, ExternalLink, Notice, Pill, Root, Stack } from './lib/ui';
 
@@ -14,7 +15,7 @@ function OfferIssues({ issues }: { issues: OfferIssue[] }) {
   return (
     <Stack as="ul" gap={12}>
       {issues.map((issue) => (
-        <li key={issue.code} style={{ borderLeft: `3px solid ${BORDERS[issue.tone]}`, paddingLeft: 12 }}>
+        <li key={issueKey(issue)} style={{ borderLeft: `3px solid ${BORDERS[issue.tone]}`, paddingLeft: 12 }}>
           <Stack gap={4}>
             <strong>{issue.description}</strong>
             {issue.detail && <div class="gmc-muted">{issue.detail}</div>}
@@ -32,7 +33,7 @@ function Issues({ issues }: { issues: StatusIssue[] }) {
       {issues.map((issue) => {
         const severity = issueSeverity(issue.severity);
         return (
-          <li key={issue.code}>
+          <li key={issueKey(issue)}>
             <Stack gap={4}>
               <div class="gmc-actions">
                 <Pill tone={severity.tone}>{severity.label}</Pill>
