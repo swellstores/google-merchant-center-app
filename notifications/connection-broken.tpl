@@ -15,9 +15,9 @@
                 {% endif %}
                 <p style="margin:0 0 24px;">Products are not being sent to Google until it is fixed.</p>
                 <p style="margin:0 0 24px;">
-                  <a href="{{ store.url }}/admin/apps" style="display:inline-block;padding:10px 18px;background-color:#1f2933;color:#ffffff;text-decoration:none;border-radius:4px;">Open your apps</a>
+                  <a href="{{ store.admin_url }}/admin/apps" style="display:inline-block;padding:10px 18px;background-color:#1f2933;color:#ffffff;text-decoration:none;border-radius:4px;">Open your apps</a>
                 </p>
-                <p style="margin:0;font-size:13px;color:#6b7280;">Open Google Merchant Center in your Swell dashboard under Apps and reconnect it.</p>
+                <p style="margin:0;font-size:13px;color:#6b7280;">Open <strong>Apps &rarr; Google Merchant Center &rarr; Settings</strong> in your Swell dashboard.</p>
               </td>
             </tr>
           </table>
