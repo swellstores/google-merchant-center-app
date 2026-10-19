@@ -15,6 +15,13 @@ describe('googleAttribute', () => {
     expect(googleAttribute('colour')).toBe('color');
   });
 
+  it('drops a dotted prefix and reads sizes as size', () => {
+    expect(googleAttribute('productAttributes.color')).toBe('color');
+    expect(googleAttribute('product_attributes.ageGroup')).toBe('age_group');
+    expect(googleAttribute('sizes')).toBe('size');
+    expect(googleAttribute('productAttributes.sizes')).toBe('size');
+  });
+
   it('empty input gives null', () => {
     expect(googleAttribute(undefined)).toBeNull();
     expect(googleAttribute('')).toBeNull();

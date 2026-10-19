@@ -14,15 +14,23 @@ export type OptionAttribute = (typeof OPTION_ATTRIBUTES)[number];
 /** Google attribute → variant option id */
 export type AttributeOptions = Partial<Record<OptionAttribute, string | null>>;
 
-/** Google's attribute name as one spelling: "age group", "ageGroup" and "age_group" are all `age_group`. */
+/** Google's own spellings of one attribute. */
+const ALIASES = new Map([['colour', 'color'], ['sizes', 'size']]);
+
+/**
+ * Google's attribute name as one spelling: "age group", "ageGroup" and "age_group" are all `age_group`,
+ * and "productAttributes.color" is `color`.
+ */
 export function googleAttribute(name: string | undefined): string | null {
   const spelled = (name ?? '')
+    .split('.')
+    .pop()!
     .trim()
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .toLowerCase()
     .replace(/[\s-]+/g, '_');
   if (!spelled) return null;
-  return spelled === 'colour' ? 'color' : spelled;
+  return ALIASES.get(spelled) ?? spelled;
 }
 
 export const providesAttribute = (attribute: string | undefined) => attribute !== undefined && PROVIDED.includes(attribute);
