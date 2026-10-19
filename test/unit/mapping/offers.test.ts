@@ -189,19 +189,26 @@ describe('buildOffers', () => {
   });
 
   it('declares missing identifiers only when the merchant says so', () => {
-    const [offer] = buildOffers({ ...MUG, $app: { [APP]: { identifier_exists: false } } }, [MARKET], OPTS).offers;
-    expect(offer.input.productAttributes.identifierExists).toBe(false);
-    expect(buildOffers(MUG, [MARKET], OPTS).offers[0].input.productAttributes.identifierExists).toBeUndefined();
+    const attributes = (fields: object) => buildOffers({ ...MUG, $app: { [APP]: fields } }, [MARKET], OPTS).offers[0].input.productAttributes;
+    expect(attributes({ no_identifiers: true }).identifierExists).toBe(false);
+    expect(attributes({}).identifierExists).toBeUndefined();
+    expect(attributes({ no_identifiers: false }).identifierExists).toBeUndefined();
   });
 
-  it('sends neither gtins nor mpn when identifier_exists is off', () => {
+  it('honours a legacy identifier_exists off until the new switch is set', () => {
+    const attributes = (fields: object) => buildOffers({ ...MUG, $app: { [APP]: fields } }, [MARKET], OPTS).offers[0].input.productAttributes;
+    expect(attributes({ identifier_exists: false }).identifierExists).toBe(false);
+    expect(attributes({ identifier_exists: false, no_identifiers: false }).identifierExists).toBeUndefined();
+  });
+
+  it('sends neither gtins nor mpn when the product has no identifiers', () => {
     const product = {
       ...MUG,
       $app: {
         [APP]: {
           identifiers: { v1: { gtin: '4006381333931', mpn: 'X1' }, product: { gtin: '0012345678905' } },
           mpn: 'TOP',
-          identifier_exists: false,
+          no_identifiers: true,
         },
       },
     };

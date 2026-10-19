@@ -1,5 +1,6 @@
 import type { Market } from '../connection/markets';
 import { productInputId, type InputKey, type ProductAttributes, type ProductInput } from '../google/merchant';
+import { hasNoIdentifiers } from './identifiers';
 import { money, unitPrices } from './price';
 import { stripHtml, truncate } from './text';
 import type { GoogleFields, SwellImage, SwellProduct, SwellVariant } from './types';
@@ -87,7 +88,7 @@ function buildInput(
   // The legacy top-level MPN counts until the barcodes table first writes its shared row (null once cleared).
   const legacyMpn = fields.identifiers && 'product' in fields.identifiers ? undefined : fields.mpn?.trim();
   const mpn = own?.mpn?.trim() || shared?.mpn?.trim() || legacyMpn || undefined;
-  const noIdentifiers = fields.identifier_exists === false;
+  const noIdentifiers = hasNoIdentifiers(fields);
   const tracked = Boolean(product.stock_tracking);
   const level = (variant ? variant.stock_level : product.stock_level) ?? 0;
 

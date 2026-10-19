@@ -6,10 +6,9 @@
   "fields": [
     {
       "id": "excluded",
-      "label": "Google listing",
-      "type": "component",
-      "component": "GoogleListingSwitch",
-      "hint": "Turn off to keep this product out of Google Shopping and free listings. Products already in Google are removed within minutes."
+      "label": "Hide from Google",
+      "type": "toggle",
+      "hint": "Turn on to keep this product out of Google Shopping and free listings. Products already in Google are removed within minutes."
     },
     {
       "id": "brand",
@@ -62,11 +61,10 @@
       ]
     },
     {
-      "id": "identifier_exists",
-      "label": "Has a barcode (GTIN) or part number (MPN)",
+      "id": "no_identifiers",
+      "label": "No barcode (GTIN) or part number (MPN)",
       "type": "toggle",
-      "default": true,
-      "hint": "Turn off for handmade, custom or vintage products that have no barcode and no manufacturer part number. Otherwise Google expects a GTIN or an MPN with the brand."
+      "hint": "Turn on for handmade, custom or vintage products that have no barcode and no manufacturer part number. Otherwise Google expects a GTIN or an MPN with the brand."
     },
     {
       "id": "identifiers",
@@ -90,7 +88,7 @@
             { "id": "excluded" },
             { "type": "field_row", "fields": [{ "id": "brand", "admin_span": 2 }, { "id": "condition", "admin_span": 2 }] },
             { "id": "google_category" },
-            { "id": "identifier_exists" },
+            { "id": "no_identifiers" },
             { "id": "identifiers" },
             { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] },
             {

@@ -32,6 +32,8 @@ export interface GoogleFields {
   google_category?: string;
   age_group?: string;
   gender?: string;
+  no_identifiers?: boolean;
+  /** Legacy: false meant "no identifiers"; counts only while `no_identifiers` is unset. */
   identifier_exists?: boolean;
   /** A cleared cell or entry is stored as null: a save merges into the stored object. */
   identifiers?: Record<string, { gtin?: string | null; mpn?: string | null } | null | undefined>;

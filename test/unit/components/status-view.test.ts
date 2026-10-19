@@ -162,7 +162,7 @@ describe('statusPanelModel', () => {
   });
 
   it('the hidden note points to the switch above', () => {
-    expect(statusPanelModel(view({ stored: { status: 'excluded' } }), NOW).hidden).toBe('Turn on “List this product in Google” above to list it again.');
+    expect(statusPanelModel(view({ stored: { status: 'excluded' } }), NOW).hidden).toBe('Turn off “Hide from Google” above to list it again.');
     expect(statusPanelModel(view(), NOW).hidden).toBeNull();
   });
 });

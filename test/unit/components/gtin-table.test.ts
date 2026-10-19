@@ -70,13 +70,15 @@ describe('gtinTableModel', () => {
     expect(editRow(null, variantRow, 'gtin', '4006381333931')).toEqual({ v1: { gtin: '4006381333931' } });
   });
 
-  it('turning the switch off keeps the values and disables the table', () => {
+  it('turning "No barcode" on keeps the values and disables the table', () => {
     const value = { v1: { gtin: '4006381333931' } };
-    const model = gtinTableModel({ variants: VARIANTS, $app: { [APP]: { identifier_exists: false } } }, value, APP);
+    const model = gtinTableModel({ variants: VARIANTS, $app: { [APP]: { no_identifiers: true } } }, value, APP);
     expect(model.disabled).toBe(true);
-    expect(model.note).toBe('Not sent while the switch above is off');
+    expect(model.note).toBe('Not sent while the switch above is on');
     expect(model.rows[1].gtin).toBe('4006381333931');
     expect(gtinTableModel({ variants: VARIANTS }, value, APP)).toMatchObject({ disabled: false, note: null });
+    expect(gtinTableModel({ variants: VARIANTS, $app: { [APP]: { identifier_exists: false } } }, value, APP).disabled).toBe(true);
+    expect(gtinTableModel({ variants: VARIANTS, $app: { [APP]: { identifier_exists: false, no_identifiers: false } } }, value, APP).disabled).toBe(false);
   });
 
   it('cleared (null) entries and cells show empty', () => {

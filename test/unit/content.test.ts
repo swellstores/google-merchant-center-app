@@ -24,14 +24,14 @@ const byId = (id: string) => resolve(tabFields.find((f) => f.id === id));
 
 const hints: Record<string, string> = {
   excluded:
-    'Turn off to keep this product out of Google Shopping and free listings. Products already in Google are removed within minutes.',
+    'Turn on to keep this product out of Google Shopping and free listings. Products already in Google are removed within minutes.',
   brand:
     'The brand of the product. Google requires it for most products; without it the product may be shown less or disapproved.',
   condition: 'Whether the product is new, used or refurbished. Empty means new.',
   google_category:
     "Optional. Google picks a category itself from the title and description; set it only to correct Google. Paste the category number or its full path from Google's list.",
-  identifier_exists:
-    'Turn off for handmade, custom or vintage products that have no barcode and no manufacturer part number. Otherwise Google expects a GTIN or an MPN with the brand.',
+  no_identifiers:
+    'Turn on for handmade, custom or vintage products that have no barcode and no manufacturer part number. Otherwise Google expects a GTIN or an MPN with the brand.',
   identifiers:
     "GTIN is the barcode number (UPC, EAN, ISBN). MPN is the manufacturer's part number. Give them per variant when the variants have their own.",
   age_group:
@@ -50,7 +50,7 @@ describe('products content, Google tab', () => {
       'excluded',
       ['brand', 'condition'],
       'google_category',
-      'identifier_exists',
+      'no_identifiers',
       'identifiers',
       ['age_group', 'gender'],
       ['status_panel', 'preview'],
@@ -68,11 +68,6 @@ describe('products content, Google tab', () => {
   });
 
   it('binds the components', () => {
-    expect(byId('excluded')).toMatchObject({
-      type: 'component',
-      component: 'GoogleListingSwitch',
-      label: 'Google listing',
-    });
     expect(byId('brand')).toMatchObject({ type: 'component', component: 'BrandInput' });
     expect(byId('google_category')).toMatchObject({
       type: 'component',
@@ -88,11 +83,19 @@ describe('products content, Google tab', () => {
   });
 
   it('sets the labels, placeholder and native types', () => {
-    expect(byId('identifier_exists')).toMatchObject({
-      type: 'toggle',
-      label: 'Has a barcode (GTIN) or part number (MPN)',
-    });
+    expect(byId('excluded')).toMatchObject({ type: 'toggle', label: 'Hide from Google' });
+    expect(byId('no_identifiers')).toMatchObject({ type: 'toggle', label: 'No barcode (GTIN) or part number (MPN)' });
     expect(byId('condition')).toMatchObject({ type: 'select', placeholder: 'New' });
+  });
+
+  // The admin fills a default into an existing product that lacks the value and marks the form changed
+  it('gives no tab field a default, so opening the tab changes nothing', () => {
+    for (const field of tabFields) expect(resolve(field).default, field.id).toBeUndefined();
+  });
+
+  it('no longer shows identifier_exists, which needed a default of true', () => {
+    expect(topFields.find((f) => f.id === 'identifier_exists')).toBeUndefined();
+    expect(tabFields.find((f) => f.id === 'identifier_exists')).toBeUndefined();
   });
 
   it('always shows age group and gender', () => {

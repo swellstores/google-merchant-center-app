@@ -1,4 +1,5 @@
 import { validateGtin } from '../../functions/lib/mapping/gtin';
+import { hasNoIdentifiers } from '../../functions/lib/mapping/identifiers';
 import type { SwellVariant } from '../../functions/lib/mapping/types';
 
 export type Identifiers = Record<string, { gtin?: string | null; mpn?: string | null } | null | undefined>;
@@ -65,7 +66,7 @@ export function gtinTableModel(
   allVariants?: SwellVariant[] | null,
 ): GtinTableModel {
   const fields = record.$app?.[appId] ?? {};
-  const disabled = fields.identifier_exists === false;
+  const disabled = hasNoIdentifiers(fields);
   // As the mapping decides: any variant, live or not, means the product sells its live variants only.
   const all = variantsOf(allVariants?.length ? allVariants : record.variants);
   const variants = all.filter((v) => v.active !== false && !v.archived);
@@ -88,7 +89,7 @@ export function gtinTableModel(
       ]
     : [{ key: SHARED, label: 'This product', gtin: shared?.gtin ?? '', mpn: sharedMpn, mpnPlaceholder: '' }];
 
-  return { rows, disabled, note: disabled ? 'Not sent while the switch above is off' : null };
+  return { rows, disabled, note: disabled ? 'Not sent while the switch above is on' : null };
 }
 
 const blank = (cell: string | null | undefined) => !cell?.trim();
