@@ -33,6 +33,8 @@ const hints: Record<string, string> = {
   no_identifiers:
     'Turn on for handmade, custom or vintage products that have no barcode and no manufacturer part number. Otherwise Google expects a GTIN or an MPN with the brand.',
   mpn: 'The manufacturer part number. Variants without their own MPN use this one.',
+  attribute_options:
+    'Google asked for these details. Pick the variant option that holds each one; every variant then sends its own value.',
   identifiers:
     'GTIN is the barcode number (UPC, EAN, ISBN). Give each variant its own; an MPN here overrides the one above for that variant.',
   age_group:
@@ -54,10 +56,11 @@ describe('products content, Google tab', () => {
       'no_identifiers',
       'mpn',
       'identifiers',
+      'attribute_options',
       ['age_group', 'gender'],
       ['status_panel', 'preview'],
     ]);
-    for (const i of [1, 6, 7]) expect(tab.fields[i].type).toBe('field_row');
+    for (const i of [1, 7, 8]) expect(tab.fields[i].type).toBe('field_row');
     expect(flatten(tab.fields).some((f) => f.type === 'field_group')).toBe(false);
   });
 
@@ -72,7 +75,13 @@ describe('products content, Google tab', () => {
   // Components only where a plain field cannot do the job
   it('binds the components', () => {
     const components = tabFields.filter((f) => resolve(f).type === 'component').map((f) => f.id);
-    expect(components).toEqual(['identifiers', 'status_panel', 'preview']);
+    expect(components).toEqual(['identifiers', 'attribute_options', 'status_panel', 'preview']);
+    expect(byId('attribute_options')).toMatchObject({
+      type: 'component',
+      component: 'GoogleNeeds',
+      label: 'Google needs',
+      conditions: { needs_attributes: true },
+    });
     expect(byId('identifiers')).toMatchObject({
       type: 'component',
       component: 'GtinTable',
@@ -136,6 +145,6 @@ describe('products content, Google tab', () => {
       expect(byId(id).conditions, id).toEqual({ no_identifiers: { $ne: true } });
     }
     const conditioned = tabFields.filter((f) => resolve(f).conditions).map((f) => f.id);
-    expect(conditioned).toEqual(['mpn', 'identifiers']);
+    expect(conditioned).toEqual(['mpn', 'identifiers', 'attribute_options']);
   });
 });

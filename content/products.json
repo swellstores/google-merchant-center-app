@@ -81,6 +81,14 @@
       "hint": "GTIN is the barcode number (UPC, EAN, ISBN). Give each variant its own; an MPN here overrides the one above for that variant.",
       "conditions": { "no_identifiers": { "$ne": true } }
     },
+    {
+      "id": "attribute_options",
+      "label": "Google needs",
+      "type": "component",
+      "component": "GoogleNeeds",
+      "conditions": { "needs_attributes": true },
+      "hint": "Google asked for these details. Pick the variant option that holds each one; every variant then sends its own value."
+    },
     { "id": "status_label", "label": "Google", "type": "short_text", "readonly": true },
     { "id": "date_status", "label": "Status checked", "type": "datetime", "readonly": true }
   ],
@@ -99,6 +107,7 @@
             { "id": "no_identifiers" },
             { "id": "mpn" },
             { "id": "identifiers" },
+            { "id": "attribute_options" },
             { "type": "field_row", "fields": [{ "id": "age_group" }, { "id": "gender" }] },
             {
               "type": "field_row",
