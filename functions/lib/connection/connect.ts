@@ -144,10 +144,12 @@ async function inGoogle<T>(what: string, call: () => Promise<T>): Promise<T> {
  * catalog unless nothing it depends on changed: a new market, a catalog sync
  * that never ran or is older than the connection. A connection newer than the
  * catalog sync, maybe to another account, also drops the status jobs: their
- * cursor and page token are the old connection's. Otherwise it only wakes the
- * courier for work that waits. Google comes first (the market's data source,
- * the quota, the old country's data source), then one batch writes it all:
- * a refusal leaves the store as it was.
+ * cursor and page token are the old connection's. Such a connection, or a
+ * new country, also drops the account check: its reasons are the old
+ * account's or country's. Otherwise it only wakes the courier for work that
+ * waits. Google comes first (the market's data source, the quota, the old
+ * country's data source), then one batch writes it all: a refusal leaves the
+ * store as it was.
  */
 export async function activate(ctx: AppContext, input: ActivateInput): Promise<StatusView> {
   validateMarket(input);
@@ -190,6 +192,7 @@ export async function activate(ctx: AppContext, input: ActivateInput): Promise<S
   const statePatch = {
     ...(restart ? { full_sync: { $set: newFullSyncJob(now) } } : {}),
     ...(reconnected && (state?.status_refresh || state?.orphan_scan) ? { status_refresh: null, orphan_scan: null } : {}),
+    ...((reconnected || !previous) && state?.account_check ? { account_check: null } : {}),
     ...(quota ? { quota: { $set: quota } } : {}),
   };
   if (Object.keys(statePatch).length) writes.push(stateWrite(state?.id, statePatch));

@@ -194,7 +194,7 @@ const ACCOUNT_ISSUES = {
     },
   ],
 };
-const STORED_ACCOUNT = {
+const STORED_CHECK = {
   reasons: [{ source: 'requirement', program: 'free-listings', code: 'HAS_WEBSITE', title: 'No website URL', action: null, documentation: null, countries: ['US'] }],
   date_checked: at(NOW - DAY),
 };
@@ -1000,7 +1000,7 @@ describe('runCourier status jobs', () => {
     const state = await loadState(swell);
     expect(state.status_refresh).toEqual(restarted);
     expect(state.summary ?? null).toBeNull();
-    expect(state.account ?? null).toBeNull();
+    expect(state.account_check ?? null).toBeNull();
   });
 
   it('an orphan scan restarted during the run wins', async () => {
@@ -1060,11 +1060,11 @@ describe('runCourier status jobs', () => {
     expect(slow.now() - NOW).toBe(4 * 500 + 2 * 1000);
     expect(roundTrips(store.swell)).toBe(4);
     const end = batchesOf(store.swell).at(-1)!.find((op) => op.url.startsWith('/sync-states/'));
-    expect(end?.data).toMatchObject({ summary: expect.anything(), account: { $set: expect.objectContaining({ date_checked: at(NOW + 3500) }) } });
+    expect(end?.data).toMatchObject({ summary: expect.anything(), account_check: { $set: expect.objectContaining({ date_checked: at(NOW + 3500) }) } });
     const state = await loadState(store.swell);
     expect(state.status_refresh).toMatchObject({ status: 'done' });
-    expect(state.account).toEqual({ reasons: accountReasons(PROGRAMS, ACCOUNT_ISSUES, ['US']), date_checked: at(NOW + 3500) });
-    expect(state.account!.reasons).toMatchObject([
+    expect(state.account_check).toEqual({ reasons: accountReasons(PROGRAMS, ACCOUNT_ISSUES, ['US']), date_checked: at(NOW + 3500) });
+    expect(state.account_check!.reasons).toMatchObject([
       { source: 'requirement', program: 'free-listings', code: 'HAS_RETURN_POLICY', countries: ['US'] },
       { source: 'issue', code: 'accounts/123/issues/website_not_claimed', countries: ['US'] },
     ]);
@@ -1079,35 +1079,61 @@ describe('runCourier status jobs', () => {
     expect(accountReads(store.google)).toEqual([]);
     const state = await loadState(store.swell);
     expect(state.status_refresh).toMatchObject({ status: 'running', checked: STATUS_PAGE });
-    expect(state.account ?? null).toBeNull();
+    expect(state.account_check ?? null).toBeNull();
   });
 
   it('a failed account read keeps the stored reasons and the run ends normally', async () => {
     const refused = { status: 401, body: { error: { code: 401, message: 'Request had invalid authentication credentials.' } } };
     const { ctx, swell, google } = await listed([MUG], { programs: refused, accountIssues: { status: 200, body: ACCOUNT_ISSUES } });
-    await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) }, account: { $set: STORED_ACCOUNT } });
+    await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) }, account_check: { $set: STORED_CHECK } });
     expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 0 });
     expect(accountReads(google)).toEqual(['issues', 'programs']);
     const state = await loadState(swell);
-    expect(state.account).toEqual(STORED_ACCOUNT);
+    expect(state.account_check).toEqual(STORED_CHECK);
     expect(state.status_refresh).toMatchObject({ status: 'done' });
     expect(state.summary).toMatchObject({ date_refreshed: at(NOW) });
     expect(state).toMatchObject({ last_error: null, backoff: 0, not_before: null });
     expect(await loadConnection(swell)).toMatchObject({ status: 'connected' });
   });
 
+  it('a failed account read waits for the other call before the run ends', async () => {
+    const refused = { status: 401, body: { error: { code: 401, message: 'Request had invalid authentication credentials.' } } };
+    const { swell, google } = await listed([MUG], { programs: refused });
+    await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) } });
+    let open = 0;
+    const issuesLater = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      open++;
+      try {
+        if (String(input).includes('/issues')) await new Promise((resolve) => setTimeout(resolve, 5));
+        return await google.fetch(input, init);
+      } finally {
+        open--;
+      }
+    }) as typeof fetch;
+    const post = swell.post.getMockImplementation()!;
+    const openAtBatch: number[] = [];
+    swell.post.mockImplementation(async (url: string, data: any) => {
+      if (url === '/:batch') openAtBatch.push(open);
+      return post(url, data);
+    });
+    expect(await runCourier(testContext(swell, issuesLater))).toEqual({ next: 'idle', sent: 0 });
+    expect(accountReads(google)).toEqual(['issues', 'programs']);
+    expect(openAtBatch.at(-1)).toBe(0);
+  });
+
   it('no budget left skips the read', async () => {
     const store = await listed([MUG]);
-    await saveState(store.swell, (await loadState(store.swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) }, account: { $set: STORED_ACCOUNT } });
-    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 });
+    await saveState(store.swell, (await loadState(store.swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) }, account_check: { $set: STORED_CHECK } });
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1600, googleMs: 1000 });
     expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now))).toEqual({ next: 'idle', sent: 0 });
-    // 2.6 s left after the pass, short of two calls at 1.5 s.
+    // 2.2 s left after the pass: two calls at once (1 s) and the end (1.6 s) do not fit, though two calls alone would.
     expect(accountReads(store.google)).toEqual([]);
-    expect(slow.now() - NOW).toBe(4 * 1300 + 1500);
+    expect(slow.now() - NOW).toBe(4 * 1600 + 1000);
+    expect(slow.now() - NOW).toBeLessThanOrEqual(COURIER_BUDGET_MS);
     const state = await loadState(store.swell);
     expect(state.status_refresh).toMatchObject({ status: 'done' });
-    expect(state.summary).toMatchObject({ date_refreshed: at(NOW + 4100) });
-    expect(state.account).toEqual(STORED_ACCOUNT);
+    expect(state.summary).toMatchObject({ date_refreshed: at(NOW + 4200) });
+    expect(state.account_check).toEqual(STORED_CHECK);
   });
 
   it('the orphan scan comes after the status refresh', async () => {

@@ -86,7 +86,7 @@
         "date_refreshed": { "type": "date" }
       }
     },
-    "account": {
+    "account_check": {
       "type": "object",
       "description": "The account's requirements and issues, read when a status refresh finished",
       "fields": {

@@ -40,7 +40,7 @@ export interface SyncState {
   /** The last finished status refresh */
   summary?: StatusSummary | null;
   /** The account's requirements and issues, read when a status refresh finished */
-  account?: AccountCheck | null;
+  account_check?: AccountCheck | null;
 }
 
 const COLLECTION = '/sync-states';

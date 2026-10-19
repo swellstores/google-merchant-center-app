@@ -6,6 +6,7 @@ import { AppError, type AppContext } from '../../../functions/lib/context';
 import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
 import { newOrphanScanJob } from '../../../functions/lib/status/orphans';
 import { newStatusRefreshJob, type StatusSummary } from '../../../functions/lib/status/refresh';
+import type { AccountCheck } from '../../../functions/lib/sync/state';
 import { fixedClock, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
@@ -54,12 +55,18 @@ const SUMMARY: StatusSummary = {
   date_refreshed: at(NOW),
 };
 
+const ACCOUNT_CHECK: AccountCheck = {
+  reasons: [{ source: 'requirement', program: 'free-listings', code: 'HAS_WEBSITE', title: 'No website URL', action: null, documentation: null, countries: ['US'] }],
+  date_checked: at(NOW),
+};
+
 /** A store that refreshed its statuses and is half way through an orphan scan. */
 async function withStatusJobs(swell: ReturnType<typeof createFakeSwell>['swell']) {
   await saveState(swell, (await loadState(swell)).id, {
     status_refresh: { $set: { ...newStatusRefreshJob(NOW), cursor: 'p1', checked: 1 } },
     orphan_scan: { $set: { ...newOrphanScanJob(NOW), page_token: '250', skip: 3 } },
     summary: { $set: SUMMARY },
+    account_check: { $set: ACCOUNT_CHECK },
   });
 }
 
@@ -359,12 +366,23 @@ describe('activate', () => {
     await connect(ctx);
     await withStatusJobs(swell);
     await connect(later(ctx));
-    expect(await loadState(swell)).toMatchObject({ status_refresh: { cursor: 'p1' }, orphan_scan: { page_token: '250', skip: 3 } });
+    expect(await loadState(swell)).toMatchObject({ status_refresh: { cursor: 'p1' }, orphan_scan: { page_token: '250', skip: 3 }, account_check: ACCOUNT_CHECK });
     await connect(later(ctx, 2), MARKET, { ...CHECK(), merchant_id: '456' });
     const state = await loadState(swell);
     expect(state.orphan_scan).toBeNull();
     expect(state.status_refresh).toBeNull();
+    expect(state.account_check).toBeNull();
     expect(state.summary).toEqual(SUMMARY);
+  });
+
+  it('a new country clears the account check, a new link keeps it', async () => {
+    const { ctx, swell } = setup();
+    await connect(ctx);
+    await withStatusJobs(swell);
+    await connect(later(ctx), { ...MARKET, link_template: 'https://shop.example.com/p/{product_id}' });
+    expect((await loadState(swell)).account_check).toEqual(ACCOUNT_CHECK);
+    await connect(later(ctx, 2), { ...MARKET, country: 'GB' });
+    expect((await loadState(swell)).account_check).toBeNull();
   });
 
   it("drops another account's data source after a failed attempt", async () => {

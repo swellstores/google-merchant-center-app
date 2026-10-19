@@ -187,15 +187,13 @@ async function prepare(run: Run): Promise<{ token: string; markets: Market[] }> 
 
 /** The account's requirements and issues in the store's markets. Any failure, a refused key included, leaves the stored ones. */
 async function readAccount(env: DeliveryEnv): Promise<AccountCheck | undefined> {
-  try {
-    const [programs, issues] = await Promise.all([
-      googleCall(env.ctx.fetch, env.token, listPrograms(env.accountId)),
-      googleCall(env.ctx.fetch, env.token, listAccountIssues(env.accountId)),
-    ]);
-    return { reasons: accountReasons(programs, issues, env.markets.map((m) => m.country)), date_checked: iso(env.ctx.now()) };
-  } catch {
-    return undefined;
-  }
+  // Both calls settle, and are timed, before the run goes on.
+  const [programs, issues] = await Promise.allSettled([
+    googleCall(env.ctx.fetch, env.token, listPrograms(env.accountId)),
+    googleCall(env.ctx.fetch, env.token, listAccountIssues(env.accountId)),
+  ]);
+  if (programs.status === 'rejected' || issues.status === 'rejected') return undefined;
+  return { reasons: accountReasons(programs.value, issues.value, env.markets.map((m) => m.country)), date_checked: iso(env.ctx.now()) };
 }
 
 async function work(run: Run): Promise<WorkResult> {
@@ -294,9 +292,10 @@ async function work(run: Run): Promise<WorkResult> {
   const idle = !queueMore && !running(catalog);
   let refresh = state.status_refresh;
   if (idle) refresh = await passesOf(refresh, prefetched(run, 'refresh', refresh, passes), (job, page) => statusRefreshPass(env, job, [reread], page));
-  // Once per refresh, by the run that finished it; the run's end writes it.
+  // Once per refresh, by the run that finished it, with time for both calls at
+  // once and the end, whose round trip writes it.
   const finished = running(state.status_refresh) && refresh?.status === 'done';
-  const account = finished && budget.allows(0, 2) ? await readAccount(env) : undefined;
+  const account = finished && budget.allows(1, 1) ? await readAccount(env) : undefined;
   let scan = state.orphan_scan;
   if (idle && !running(refresh)) scan = await passesOf(scan, undefined, (job) => orphanScanPass(env, job, [reread]));
   return { sent, failure, queueMore, jobs: { full_sync: catalog, status_refresh: refresh, orphan_scan: scan }, account };
@@ -327,7 +326,7 @@ async function finish(run: Ending, result: WorkResult): Promise<CourierOutcome> 
   const scan = settle('orphan_scan');
   if (patch.status_refresh && refresh?.status === 'done') {
     patch.summary = { $set: summaryOf(refresh) };
-    if (result.account) patch.account = { $set: result.account };
+    if (result.account) patch.account_check = { $set: result.account };
   }
   const end = ctx.now();
 
