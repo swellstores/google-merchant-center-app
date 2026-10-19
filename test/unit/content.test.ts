@@ -34,7 +34,7 @@ const hints: Record<string, string> = {
     'Turn on for handmade, custom or vintage products that have no barcode and no manufacturer part number. Otherwise Google expects a GTIN or an MPN with the brand.',
   mpn: 'The manufacturer part number. Variants without their own MPN use this one.',
   attribute_options:
-    'Google asked for these details. Pick the variant option that holds each one; every variant then sends its own value.',
+    'Pick the variant option that holds each attribute; every variant then sends its own value. Google requires some of these for clothing.',
   identifiers:
     'GTIN is the barcode number (UPC, EAN, ISBN). Give each variant its own; an MPN here overrides the one above for that variant.',
   age_group:
@@ -79,7 +79,7 @@ describe('products content, Google tab', () => {
     expect(byId('attribute_options')).toMatchObject({
       type: 'component',
       component: 'GoogleNeeds',
-      label: 'Google needs',
+      label: 'Variant attributes',
       conditions: { needs_attributes: true },
     });
     expect(byId('identifiers')).toMatchObject({

@@ -83,11 +83,11 @@
     },
     {
       "id": "attribute_options",
-      "label": "Google needs",
+      "label": "Variant attributes",
       "type": "component",
       "component": "GoogleNeeds",
       "conditions": { "needs_attributes": true },
-      "hint": "Google asked for these details. Pick the variant option that holds each one; every variant then sends its own value."
+      "hint": "Pick the variant option that holds each attribute; every variant then sends its own value. Google requires some of these for clothing."
     },
     { "id": "status_label", "label": "Google", "type": "short_text", "readonly": true },
     { "id": "date_status", "label": "Status checked", "type": "datetime", "readonly": true }

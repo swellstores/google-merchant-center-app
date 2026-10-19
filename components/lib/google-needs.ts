@@ -17,6 +17,13 @@ export interface NeedRow {
   chosen: string | null;
   /** The chosen id is not among the options. */
   missing: boolean;
+  /** Google asks for the attribute. */
+  asked: boolean;
+}
+
+export interface NeedNote {
+  text: string;
+  tone: 'warn' | 'bad' | 'muted';
 }
 
 const LABELS: Record<string, string> = {
@@ -34,21 +41,37 @@ export function needRows(record: unknown, value: AttributeOptions | null, appId:
   const variantOptions = (Array.isArray(options) ? options : [])
     .filter((option) => option?.variant === true && typeof option.id === 'string')
     .map((option) => ({ id: option.id, name: option.name || option.id }));
+  const chosenOf = (attribute: string) => (value as Record<string, string | null | undefined> | null)?.[attribute] ?? null;
 
   const rows: NeedRow[] = [];
-  for (const attribute of [...OPTION_ATTRIBUTES, ...Object.keys(FIELD_ATTRIBUTES)]) {
-    const chosen = (value as Record<string, string | null | undefined> | null)?.[attribute] ?? null;
-    if (!needed.has(attribute) && chosen === null) continue;
-    const label = LABELS[attribute];
-    const base = { attribute, label, chosen, missing: chosen !== null && !variantOptions.some((o) => o.id === chosen) };
-    if (attribute in FIELD_ATTRIBUTES) rows.push({ ...base, kind: 'field', options: [], missing: false });
-    else if (!variantOptions.length && chosen === null) rows.push({ ...base, kind: 'create', options: [] });
-    else rows.push({ ...base, kind: 'option', options: variantOptions });
+  // With variant options every option row stays, whatever its choice: "Not sent" never removes one.
+  for (const attribute of OPTION_ATTRIBUTES) {
+    const chosen = chosenOf(attribute);
+    const base = { attribute, label: LABELS[attribute], chosen, asked: needed.has(attribute) };
+    if (variantOptions.length) {
+      rows.push({ ...base, kind: 'option', options: variantOptions, missing: chosen !== null && !variantOptions.some((o) => o.id === chosen) });
+    } else if (chosen !== null) {
+      rows.push({ ...base, kind: 'option', options: [], missing: true });
+    } else if (base.asked) {
+      rows.push({ ...base, kind: 'create', options: [], missing: false });
+    }
+  }
+  for (const attribute of Object.keys(FIELD_ATTRIBUTES)) {
+    if (!needed.has(attribute)) continue;
+    rows.push({ attribute, label: LABELS[attribute], kind: 'field', options: [], chosen: chosenOf(attribute), missing: false, asked: true });
   }
   return rows;
 }
 
 export const MISSING_OPTION = 'The chosen option no longer exists or no longer makes variants.';
+
+/** The line under an option row's select. */
+export function needNote(row: Pick<NeedRow, 'kind' | 'asked' | 'chosen' | 'missing'>): NeedNote | null {
+  if (row.missing) return { text: MISSING_OPTION, tone: 'bad' };
+  if (row.kind !== 'option' || !row.asked) return null;
+  if (row.chosen === null) return { text: 'Google asks for this.', tone: 'warn' };
+  return { text: 'Google rechecks this after the next sync.', tone: 'muted' };
+}
 
 /** The line a row without a select shows instead. The age group and gender fields sit in the row after this block. */
 export function needHint(row: Pick<NeedRow, 'kind' | 'label'>): string | null {
