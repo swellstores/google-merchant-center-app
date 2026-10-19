@@ -2,9 +2,11 @@ import { ensureDataSources, marketsRead, type Market } from '../connection/marke
 import { connectionRead, connectionWrite, type Connection } from '../connection/store';
 import { accessTokenFor, brokenPatch, tokenFresh } from '../connection/token';
 import { measured, type AppContext } from '../context';
-import { GoogleApiError } from '../google/http';
+import { googleCall, GoogleApiError } from '../google/http';
+import { listAccountIssues, listPrograms } from '../google/merchant';
 import type { OfferDefaults } from '../mapping/offers';
 import type { SwellProduct } from '../mapping/types';
+import { accountReasons } from '../status/account';
 import { newOrphanScanJob, orphanScanPass } from '../status/orphans';
 import { newStatusRefreshJob, statusPageRead, statusRefreshPass, summaryOf, type StatusRefreshJob } from '../status/refresh';
 import { orphanScanDue, refreshDue } from '../status/schedule';
@@ -15,7 +17,7 @@ import { deliver, PASS_PRODUCTS, productIdsOf, productsOf, productsRead, type De
 import { fullSyncPass, pageRead, type PassResult } from './full-sync';
 import { quotaDue, readQuota } from './quota';
 import { itemsRead, settleWrites, takeRead, unitsFromQueue, type QueueItem, type WorkUnit } from './queue';
-import { stateById, stateRead, stateWrite, type FullSyncJob, type SyncState } from './state';
+import { stateById, stateRead, stateWrite, type AccountCheck, type FullSyncJob, type SyncState } from './state';
 
 export { PASS_PRODUCTS };
 
@@ -97,6 +99,8 @@ interface WorkResult {
   failure?: GoogleApiError;
   queueMore: boolean;
   jobs: Jobs;
+  /** Read when the run finished the status refresh */
+  account?: AccountCheck;
 }
 
 /** Everything a run decides on, in one round trip. */
@@ -179,6 +183,19 @@ async function prepare(run: Run): Promise<{ token: string; markets: Market[] }> 
     run.quotaChanged = true;
   }
   return { token, markets: await ensureDataSources(ctx, token, connection.merchant_id!, run.markets) };
+}
+
+/** The account's requirements and issues in the store's markets. Any failure, a refused key included, leaves the stored ones. */
+async function readAccount(env: DeliveryEnv): Promise<AccountCheck | undefined> {
+  try {
+    const [programs, issues] = await Promise.all([
+      googleCall(env.ctx.fetch, env.token, listPrograms(env.accountId)),
+      googleCall(env.ctx.fetch, env.token, listAccountIssues(env.accountId)),
+    ]);
+    return { reasons: accountReasons(programs, issues, env.markets.map((m) => m.country)), date_checked: iso(env.ctx.now()) };
+  } catch {
+    return undefined;
+  }
 }
 
 async function work(run: Run): Promise<WorkResult> {
@@ -277,9 +294,12 @@ async function work(run: Run): Promise<WorkResult> {
   const idle = !queueMore && !running(catalog);
   let refresh = state.status_refresh;
   if (idle) refresh = await passesOf(refresh, prefetched(run, 'refresh', refresh, passes), (job, page) => statusRefreshPass(env, job, [reread], page));
+  // Once per refresh, by the run that finished it; the run's end writes it.
+  const finished = running(state.status_refresh) && refresh?.status === 'done';
+  const account = finished && budget.allows(0, 2) ? await readAccount(env) : undefined;
   let scan = state.orphan_scan;
   if (idle && !running(refresh)) scan = await passesOf(scan, undefined, (job) => orphanScanPass(env, job, [reread]));
-  return { sent, failure, queueMore, jobs: { full_sync: catalog, status_refresh: refresh, orphan_scan: scan } };
+  return { sent, failure, queueMore, jobs: { full_sync: catalog, status_refresh: refresh, orphan_scan: scan }, account };
 }
 
 /** The run's last round trip: the state, the next alarm and whatever still waits, in one batch. */
@@ -305,7 +325,10 @@ async function finish(run: Ending, result: WorkResult): Promise<CourierOutcome> 
   const catalog = settle('full_sync');
   const refresh = settle('status_refresh');
   const scan = settle('orphan_scan');
-  if (patch.status_refresh && refresh?.status === 'done') patch.summary = { $set: summaryOf(refresh) };
+  if (patch.status_refresh && refresh?.status === 'done') {
+    patch.summary = { $set: summaryOf(refresh) };
+    if (result.account) patch.account = { $set: result.account };
+  }
   const end = ctx.now();
 
   let at: number | null;

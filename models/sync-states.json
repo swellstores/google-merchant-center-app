@@ -2,7 +2,7 @@
   "$schema": "https://json.swell.store/model.json",
   "collection": "sync-states",
   "label": "Google sync state",
-  "description": "The courier's running mark, back-off, catalog sync and status refresh jobs, status summary and Merchant API quota. One record per store.",
+  "description": "The courier's running mark, back-off, catalog sync and status refresh jobs, status summary, account requirements and Merchant API quota. One record per store.",
   "fields": {
     "running_since": { "type": "date" },
     "run_seq": { "type": "int", "default": 0, "description": "Bumped atomically by every run's mark: of runs that start together, only the one that gets the next number works" },
@@ -84,6 +84,14 @@
         },
         "top_issues": { "type": "array", "value_type": "object" },
         "date_refreshed": { "type": "date" }
+      }
+    },
+    "account": {
+      "type": "object",
+      "description": "The account's requirements and issues, read when a status refresh finished",
+      "fields": {
+        "reasons": { "type": "array", "value_type": "object" },
+        "date_checked": { "type": "date" }
       }
     }
   }

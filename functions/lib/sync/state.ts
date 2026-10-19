@@ -1,3 +1,4 @@
+import type { AccountReason } from '../status/account';
 import type { OrphanScanJob } from '../status/orphans';
 import type { StatusRefreshJob, StatusSummary } from '../status/refresh';
 import type { BatchOp } from '../swell-batch';
@@ -19,6 +20,11 @@ export interface QuotaInfo {
   exhausted_until?: string | null;
 }
 
+export interface AccountCheck {
+  reasons: AccountReason[];
+  date_checked: string;
+}
+
 export interface SyncState {
   id: string;
   running_since?: string | null;
@@ -33,6 +39,8 @@ export interface SyncState {
   orphan_scan?: OrphanScanJob | null;
   /** The last finished status refresh */
   summary?: StatusSummary | null;
+  /** The account's requirements and issues, read when a status refresh finished */
+  account?: AccountCheck | null;
 }
 
 const COLLECTION = '/sync-states';

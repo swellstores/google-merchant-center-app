@@ -7,6 +7,7 @@ import type { ServiceAccountKey } from '../../../functions/lib/google/jwt';
 import { newOrphanScanJob } from '../../../functions/lib/status/orphans';
 import { pendingStatus, type GoogleProductStatus } from '../../../functions/lib/status/product-status';
 import { newStatusRefreshJob, STATUS_PAGE, summaryOf } from '../../../functions/lib/status/refresh';
+import { accountReasons } from '../../../functions/lib/status/account';
 import { APP_ID, fixedClock, NOW, slowServices, testContext } from '../../helpers/context';
 import { createFakeGoogle, type FakeGoogleOptions } from '../../helpers/fake-google';
 import { batchesOf, createFakeSwell, roundTrips } from '../../helpers/fake-swell';
@@ -165,6 +166,38 @@ const googleCalls = (google: ReturnType<typeof createFakeGoogle>) =>
     if (r.method === 'GET' && /\/accounts\/\d+\/products$/.test(path)) return ['list'];
     return [];
   });
+
+/** Google's reads of the account's programs and issues. */
+const accountReads = (google: ReturnType<typeof createFakeGoogle>) =>
+  google.requests.flatMap((r) => r.path.split('?')[0].match(/\/accounts\/\d+\/(programs|issues)$/)?.[1] ?? []).sort();
+
+const PROGRAMS = {
+  programs: [
+    {
+      name: 'accounts/123/programs/free-listings',
+      state: 'ENABLED',
+      unmetRequirements: [
+        { title: 'HAS_RETURN_POLICY', affectedRegionCodes: ['DE', 'US'] },
+        { title: 'HAS_KOREAN_BUSINESS_REGISTRATION_NUMBER', affectedRegionCodes: ['KR'] },
+      ],
+    },
+  ],
+};
+const ACCOUNT_ISSUES = {
+  accountIssues: [
+    {
+      name: 'accounts/123/issues/website_not_claimed',
+      title: 'Website not claimed',
+      severity: 'CRITICAL',
+      detail: 'Claim your website.',
+      impactedDestinations: [{ reportingContext: 'SHOPPING_ADS', impacts: [{ regionCode: 'US', severity: 'CRITICAL' }] }],
+    },
+  ],
+};
+const STORED_ACCOUNT = {
+  reasons: [{ source: 'requirement', program: 'free-listings', code: 'HAS_WEBSITE', title: 'No website URL', action: null, documentation: null, countries: ['US'] }],
+  date_checked: at(NOW - DAY),
+};
 
 describe('runCourier', () => {
   it('clears the alarm when Google is not connected', async () => {
@@ -967,6 +1000,7 @@ describe('runCourier status jobs', () => {
     const state = await loadState(swell);
     expect(state.status_refresh).toEqual(restarted);
     expect(state.summary ?? null).toBeNull();
+    expect(state.account ?? null).toBeNull();
   });
 
   it('an orphan scan restarted during the run wins', async () => {
@@ -1013,6 +1047,67 @@ describe('runCourier status jobs', () => {
       top_issues: [expect.objectContaining({ code: 'image_too_small', products: 1 })],
       date_refreshed: at(NOW),
     });
+  });
+
+  it('a finished refresh stores the account reasons', async () => {
+    const store = await listed([MUG], { programs: { status: 200, body: PROGRAMS }, accountIssues: { status: 200, body: ACCOUNT_ISSUES } });
+    await saveState(store.swell, (await loadState(store.swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) } });
+    forget(store.swell);
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 500, googleMs: 1000 });
+    expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now))).toEqual({ next: 'idle', sent: 0 });
+    expect(accountReads(store.google)).toEqual(['issues', 'programs']);
+    // Start, the mark with the page, Google, the writes, both account reads at once, the end.
+    expect(slow.now() - NOW).toBe(4 * 500 + 2 * 1000);
+    expect(roundTrips(store.swell)).toBe(4);
+    const end = batchesOf(store.swell).at(-1)!.find((op) => op.url.startsWith('/sync-states/'));
+    expect(end?.data).toMatchObject({ summary: expect.anything(), account: { $set: expect.objectContaining({ date_checked: at(NOW + 3500) }) } });
+    const state = await loadState(store.swell);
+    expect(state.status_refresh).toMatchObject({ status: 'done' });
+    expect(state.account).toEqual({ reasons: accountReasons(PROGRAMS, ACCOUNT_ISSUES, ['US']), date_checked: at(NOW + 3500) });
+    expect(state.account!.reasons).toMatchObject([
+      { source: 'requirement', program: 'free-listings', code: 'HAS_RETURN_POLICY', countries: ['US'] },
+      { source: 'issue', code: 'accounts/123/issues/website_not_claimed', countries: ['US'] },
+    ]);
+  });
+
+  it('a refresh still running does not read the account', async () => {
+    const store = await listed(many(STATUS_PAGE + 1));
+    await saveState(store.swell, (await loadState(store.swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) } });
+    // Time for the account reads after the pass, not for a second pass.
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1000 });
+    expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now))).toEqual({ next: 'soon', sent: 0 });
+    expect(accountReads(store.google)).toEqual([]);
+    const state = await loadState(store.swell);
+    expect(state.status_refresh).toMatchObject({ status: 'running', checked: STATUS_PAGE });
+    expect(state.account ?? null).toBeNull();
+  });
+
+  it('a failed account read keeps the stored reasons and the run ends normally', async () => {
+    const refused = { status: 401, body: { error: { code: 401, message: 'Request had invalid authentication credentials.' } } };
+    const { ctx, swell, google } = await listed([MUG], { programs: refused, accountIssues: { status: 200, body: ACCOUNT_ISSUES } });
+    await saveState(swell, (await loadState(swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) }, account: { $set: STORED_ACCOUNT } });
+    expect(await runCourier(ctx)).toEqual({ next: 'idle', sent: 0 });
+    expect(accountReads(google)).toEqual(['issues', 'programs']);
+    const state = await loadState(swell);
+    expect(state.account).toEqual(STORED_ACCOUNT);
+    expect(state.status_refresh).toMatchObject({ status: 'done' });
+    expect(state.summary).toMatchObject({ date_refreshed: at(NOW) });
+    expect(state).toMatchObject({ last_error: null, backoff: 0, not_before: null });
+    expect(await loadConnection(swell)).toMatchObject({ status: 'connected' });
+  });
+
+  it('no budget left skips the read', async () => {
+    const store = await listed([MUG]);
+    await saveState(store.swell, (await loadState(store.swell)).id, { status_refresh: { $set: newStatusRefreshJob(NOW - MINUTE) }, account: { $set: STORED_ACCOUNT } });
+    const slow = slowServices(store.swell, store.google.fetch, { swellMs: 1300, googleMs: 1500 });
+    expect(await runCourier(testContext(slow.swell, slow.fetch, slow.now))).toEqual({ next: 'idle', sent: 0 });
+    // 2.6 s left after the pass, short of two calls at 1.5 s.
+    expect(accountReads(store.google)).toEqual([]);
+    expect(slow.now() - NOW).toBe(4 * 1300 + 1500);
+    const state = await loadState(store.swell);
+    expect(state.status_refresh).toMatchObject({ status: 'done' });
+    expect(state.summary).toMatchObject({ date_refreshed: at(NOW + 4100) });
+    expect(state.account).toEqual(STORED_ACCOUNT);
   });
 
   it('the orphan scan comes after the status refresh', async () => {

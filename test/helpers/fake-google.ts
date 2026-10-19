@@ -28,6 +28,10 @@ export interface FakeGoogleOptions {
   strays?: { dataSource: string; offerId: string; contentLanguage: string; feedLabel: string; itemGroupId?: string }[];
   /** Per-input answer for products.get, e.g. a 500 */
   productsGetErrors?: Record<string, Reply>;
+  /** Replaces the programs answer, which has no unmet requirements */
+  programs?: Reply;
+  /** Replaces the account issues answer, which has none */
+  accountIssues?: Reply;
 }
 
 /** The shape Google answers with (spike 3): one group per method, the insert group among them. */
@@ -110,6 +114,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}) {
         body: { name: `accounts/${m[1]}/homepage`, uri: options.homepage?.uri ?? 'https://shop.example.com', claimed: options.homepage?.claimed ?? true },
       };
     }
+    if (path.match(/^\/accounts\/v1\/accounts\/\d+\/programs$/)) return options.programs ?? { status: 200, body: { programs: [] } };
+    if (path.match(/^\/accounts\/v1\/accounts\/\d+\/issues$/)) return options.accountIssues ?? { status: 200, body: { accountIssues: [] } };
     if ((m = path.match(/^\/accounts\/v1\/accounts\/(\d+)$/))) {
       return options.account ?? { status: 200, body: { name: `accounts/${m[1]}`, accountName: 'Demo Shop' } };
     }
