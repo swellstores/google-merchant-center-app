@@ -1,5 +1,6 @@
 import type { Market } from '../connection/markets';
 import { productInputId, type InputKey, type ProductAttributes, type ProductInput } from '../google/merchant';
+import { variantAttributes } from './attributes';
 import { money, unitPrices } from './price';
 import { stripHtml, truncate } from './text';
 import type { GoogleFields, SwellImage, SwellProduct, SwellVariant } from './types';
@@ -114,6 +115,7 @@ function buildInput(
     itemGroupId: variant ? product.id : undefined,
     ageGroup: fields.age_group ? fields.age_group.toUpperCase() : undefined,
     gender: fields.gender ? fields.gender.toUpperCase() : undefined,
+    ...variantAttributes(product, variant, fields.attribute_options),
   };
 
   return {

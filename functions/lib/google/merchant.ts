@@ -23,6 +23,10 @@ export interface ProductAttributes {
   itemGroupId?: string;
   ageGroup?: string;
   gender?: string;
+  color?: string;
+  sizes?: string[];
+  material?: string;
+  pattern?: string;
 }
 
 export interface ProductInput {

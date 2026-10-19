@@ -250,6 +250,37 @@ describe('buildOffers', () => {
   });
 });
 
+describe('buildOffers attributes from options', () => {
+  const product: SwellProduct = {
+    ...SHIRT,
+    options: [
+      { id: 'o1', name: 'Hue', variant: true, values: [{ id: 'a', name: 'Red' }, { id: 'b', name: 'Blue' }] },
+      { id: 'o2', name: 'Fit', variant: true, values: [{ id: 'm', name: 'M' }] },
+    ],
+    variants: {
+      results: [
+        { id: 'v1', name: 'Red / M', price: 22, active: true, option_value_ids: ['a', 'm'] },
+        { id: 'v2', name: 'Blue / M', price: 22, active: true, option_value_ids: ['b', 'm'] },
+      ],
+    },
+    $app: { [APP]: { attribute_options: { color: 'o1', size: 'o2' } } },
+  };
+
+  it('sends each variant its own chosen values', () => {
+    const { offers } = buildOffers(product, [MARKET], OPTS);
+    expect(offers.map((o) => [o.input.productAttributes.color, o.input.productAttributes.sizes])).toEqual([
+      ['Red', ['M']],
+      ['Blue', ['M']],
+    ]);
+  });
+
+  it('sends nothing without a choice', () => {
+    const { offers } = buildOffers({ ...product, $app: {} }, [MARKET], OPTS);
+    expect(offers[0].input.productAttributes).not.toHaveProperty('color');
+    expect(offers[0].input.productAttributes).not.toHaveProperty('sizes');
+  });
+});
+
 describe('input ids', () => {
   it('splits an input id and finds its market', () => {
     expect(parseInputId('en~US~v1')).toEqual({ contentLanguage: 'en', feedLabel: 'US', offerId: 'v1' });

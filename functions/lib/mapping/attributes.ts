@@ -1,4 +1,6 @@
+import type { ProductAttributes } from '../google/merchant';
 import type { StatusIssue } from '../status/product-status';
+import type { SwellProduct, SwellVariant } from './types';
 
 /** Google attributes filled from a variant option. */
 export const OPTION_ATTRIBUTES = ['color', 'size', 'material', 'pattern'] as const;
@@ -27,4 +29,28 @@ export function neededAttributes(issues: StatusIssue[]): string[] {
 
 export function needsAttributes(issues: StatusIssue[], chosen: AttributeOptions | null | undefined): boolean {
   return neededAttributes(issues).length > 0 || Object.values(chosen ?? {}).some((id) => id != null);
+}
+
+/**
+ * The variant's value of each option the merchant chose. Options are found by id only:
+ * nothing is read from option or value names, nor from the option's `attribute_id`.
+ */
+export function variantAttributes(
+  product: SwellProduct,
+  variant: SwellVariant | undefined,
+  chosen: AttributeOptions | null | undefined,
+): Partial<Pick<ProductAttributes, 'color' | 'sizes' | 'material' | 'pattern'>> {
+  const out: Partial<Pick<ProductAttributes, 'color' | 'sizes' | 'material' | 'pattern'>> = {};
+  const valueIds = variant?.option_value_ids;
+  if (!chosen || !valueIds?.length) return out;
+  for (const attribute of OPTION_ATTRIBUTES) {
+    const optionId = chosen[attribute];
+    if (!optionId) continue;
+    const option = product.options?.find((o) => o.id === optionId && o.variant);
+    const value = option?.values?.find((v) => valueIds.includes(v.id));
+    if (!value?.name) continue;
+    if (attribute === 'size') out.sizes = [value.name];
+    else out[attribute] = value.name;
+  }
+  return out;
 }

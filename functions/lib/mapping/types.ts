@@ -22,6 +22,15 @@ export interface SwellVariant {
   active?: boolean;
   archived?: boolean;
   images?: SwellImage[];
+  option_value_ids?: string[] | null;
+}
+
+export interface SwellOption {
+  id: string;
+  name?: string;
+  variant?: boolean;
+  active?: boolean;
+  values?: { id: string; name?: string }[];
 }
 
 /** The app's fields on a product, `$app.google_merchant_center` (models/products.json). */
@@ -69,6 +78,7 @@ export interface SwellProduct {
   images?: SwellImage[];
   type?: string;
   delivery?: string;
+  options?: SwellOption[] | null;
   variants?: { results?: SwellVariant[] } | SwellVariant[];
   $app?: Record<string, GoogleFields | undefined>;
 }
