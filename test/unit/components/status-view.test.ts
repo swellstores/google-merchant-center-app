@@ -172,14 +172,6 @@ describe('issueSeverity', () => {
     expect(issueSeverity('review')).toEqual({ tone: 'neutral', label: 'In review' });
     expect(issueSeverity('info')).toEqual({ tone: 'neutral', label: 'Info' });
   });
-});
-
-describe('callRoute with a query', () => {
-  it('keeps the query of a GET', async () => {
-    const fetchFn = vi.fn(async () => new Response('{}', { status: 200 }));
-    await callRoute(fetchFn as unknown as typeof fetch, 'product?id=abc');
-    expect(fetchFn).toHaveBeenCalledWith('/functions/google_merchant_center/product?id=abc', { method: 'GET' });
-  });
 
   it('the product line shows only for a pending product while reasons exist', () => {
     const LINE = "Google waits for your account details before reviewing products. See the app's Overview.";
@@ -189,5 +181,13 @@ describe('callRoute with a query', () => {
     expect(statusPanelModel(view({ account_waiting: true }), NOW).accountNote).toBeNull();
     const live = { checked_at: '2026-10-16T12:00:00Z', more: 0, offers: [offer({ status: 'pending' })] };
     expect(statusPanelModel(view({ account_waiting: true, live }), NOW).accountNote).toBe(LINE);
+  });
+});
+
+describe('callRoute with a query', () => {
+  it('keeps the query of a GET', async () => {
+    const fetchFn = vi.fn(async () => new Response('{}', { status: 200 }));
+    await callRoute(fetchFn as unknown as typeof fetch, 'product?id=abc');
+    expect(fetchFn).toHaveBeenCalledWith('/functions/google_merchant_center/product?id=abc', { method: 'GET' });
   });
 });

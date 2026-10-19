@@ -141,4 +141,12 @@ describe('dashboardModel', () => {
       merchantUrl: 'https://merchants.google.com/mc/overview?a=123',
     });
   });
+
+  it('card edge cases: unknown country, no countries, no Merchant Center link', () => {
+    const reason = { source: 'requirement' as const, program: 'free-listings' as const, code: 'A', title: 'A', action: null, documentation: null };
+    const card = (countries: string[]) => dashboardModel(view({ account: { reasons: [{ ...reason, countries }], merchant_url: null } }), NOW).account;
+    expect(card(['ZZ'])?.rows[0].meta).toBe('Free listings · ZZ');
+    expect(card([])?.rows[0].meta).toBe('Free listings');
+    expect(card(['US'])?.merchantUrl).toBeNull();
+  });
 });

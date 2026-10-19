@@ -150,7 +150,7 @@ export default function GoogleStatus(props: ComponentProps) {
                 ))}
               </Stack>
             )}
-            {model.accountNote && <span class="gmc-muted">{model.accountNote}</span>}
+            {model.accountNote && <span style={{ color: 'var(--warn)' }}>{model.accountNote}</span>}
             {model.hidden && <span class="gmc-muted">{model.hidden}</span>}
           </Stack>
           {model.refusal && <Notice tone="bad">{model.refusal}</Notice>}

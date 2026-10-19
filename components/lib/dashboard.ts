@@ -81,7 +81,7 @@ export const SEVERITIES: Record<IssueTally['severity'], { tone: Tone; label: str
 };
 
 const COUNTRY_NAMES = new Map(COUNTRIES);
-const PROGRAMS = { 'free-listings': 'Free listings', 'shopping-ads': 'Shopping ads' };
+const PROGRAMS: Record<NonNullable<AccountReason['program']>, string> = { 'free-listings': 'Free listings', 'shopping-ads': 'Shopping ads' };
 
 function accountOf({ account }: DashboardView): DashboardModel['account'] {
   if (account.reasons.length === 0) return null;
